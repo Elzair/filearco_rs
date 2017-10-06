@@ -1,0 +1,15 @@
+[package]
+name = "filearco"
+version = "0.1.0"
+authors = ["Philip Woods <elzairthesorcerer@gmail.com>"]
+
+[dependencies]
+bincode = "0.8"
+memmap = "^0.5.2"
+memadvise = { git = "https://github.com/elzair/memadvise" }
+serde = "^1.0"
+serde_derive = "^1.0"
+walkdir = "1.0"
+
+[dev-dependencies]
+# serde_bytes = "0.10"
