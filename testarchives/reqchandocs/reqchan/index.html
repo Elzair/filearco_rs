@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="rustdoc">
+    <meta name="description" content="API documentation for the Rust `reqchan` crate.">
+    <meta name="keywords" content="rust, rustlang, rust-lang, reqchan">
+
+    <title>reqchan - Rust</title>
+
+    <link rel="stylesheet" type="text/css" href="../normalize.css">
+    <link rel="stylesheet" type="text/css" href="../rustdoc.css">
+    <link rel="stylesheet" type="text/css" href="../main.css">
+    
+
+    
+    
+</head>
+<body class="rustdoc mod">
+    <!--[if lte IE 8]>
+    <div class="warning">
+        This old browser is unsupported and will most likely display funky
+        things.
+    </div>
+    <![endif]-->
+
+    
+
+    <nav class="sidebar">
+        
+        <p class='location'>Crate reqchan</p><div class="block items"><ul><li><a href="#structs">Structs</a></li><li><a href="#enums">Enums</a></li><li><a href="#functions">Functions</a></li></ul></div><p class='location'></p><script>window.sidebarCurrent = {name: 'reqchan', ty: 'mod', relpath: '../'};</script>
+    </nav>
+
+    <nav class="sub">
+        <form class="search-form js-only">
+            <div class="search-container">
+                <input class="search-input" name="search"
+                       autocomplete="off"
+                       placeholder="Click or press ‘S’ to search, ‘?’ for more options…"
+                       type="search">
+            </div>
+        </form>
+    </nav>
+
+    <section id='main' class="content">
+<h1 class='fqn'><span class='in-band'>Crate <a class="mod" href=''>reqchan</a></span><span class='out-of-band'><span id='render-detail'>
+                   <a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">
+                       [<span class='inner'>&#x2212;</span>]
+                   </a>
+               </span><a class='srclink' href='../src/reqchan/lib.rs.html#1-1052' title='goto source code'>[src]</a></span></h1>
+<div class='docblock'><p>This crate defines a channel for requesting and receiving data. Each
+channel has only one requesting end, but it can have multiple responding
+ends. It is useful for implementing work sharing.</p>
+
+<p>The two ends of the channel are asynchronous with respect to each other,
+so it is kinda nonblocking. However, if multiple responding ends try to 
+respond to the same request, only one will succeed; the rest will
+return errors.  </p>
+
+<h1 id='design' class='section-header'><a href='#design'>Design</a></h1>
+<h2 id='overview' class='section-header'><a href='#overview'>Overview</a></h2>
+<p><code>reqchan</code> is built around the two halves of the channel: <code>Requester</code>
+and <code>Responder</code>. Both implement methods, <code>Requester::try_request()</code> and
+<code>Responder::try_respond()</code>, that, when succesful, lock their corresponding
+side of the channel and return contracts. <code>RequestContract</code> <strong>requires</strong> the
+user to either successfully receive a datum or cancel the request.
+<code>ResponseContract</code> requires the user to send a datum. These requirements
+prevent the system from losing data sent through the channel.</p>
+
+<h2 id='locking' class='section-header'><a href='#locking'>Locking</a></h2>
+<p><code>Responder::try_response()</code> locks the responding side to prevent other
+potential responders from responding to the same request. However,
+<code>Requester::try_request()</code> locks the requesting side of the channel
+to prevent the user from trying to issue multiple outstanding requests.
+Both locks are dropped when their corresponding contract object is dropped.</p>
+
+<h2 id='contracts' class='section-header'><a href='#contracts'>Contracts</a></h2>
+<p><code>Requester::try_request()</code> has to issue a <code>RequestContract</code> so the
+thread of execution does not block waiting for a response. However,
+that reason does not apply to <code>Responder::try_response()</code>. I originally
+made <code>Responder::try_response()</code> send the datum. However, that required
+the user to have the datum available to send even if it could not be sent,
+and it required the user to handle the returned datum if it could not be
+sent. If the datum was, say, half the contents of a <code>Vec</code>, this might entail
+lots of expensive memory allocation. Therefore, I made <code>Responder::try_response()</code>
+return a <code>ResponseContract</code> indicating that the responder <em>could</em> and <em>would</em>
+respond to the request. This way the user only has to perform the necessary
+steps to send the datum if the datum must be sent.</p>
+
+<h1 id='examples' class='section-header'><a href='#examples'>Examples</a></h1>
+<h2 id='simple-example' class='section-header'><a href='#simple-example'>Simple Example</a></h2>
+<p>This simple, single-threaded example demonstrates most of the API.
+The only thing left out is <code>RequestContract::try_cancel()</code>.</p>
+
+<pre class="rust rust-example-rendered">
+<span class="kw">extern</span> <span class="kw">crate</span> <span class="ident">reqchan</span>;
+
+<span class="comment">// Create channel.</span>
+<span class="kw">let</span> (<span class="ident">requester</span>, <span class="ident">responder</span>) <span class="op">=</span> <span class="ident">reqchan</span>::<span class="ident">channel</span>::<span class="op">&lt;</span><span class="ident">u32</span><span class="op">&gt;</span>(); 
+
+<span class="comment">// Issue request.</span>
+<span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">request_contract</span> <span class="op">=</span> <span class="ident">requester</span>.<span class="ident">try_request</span>().<span class="ident">unwrap</span>();
+
+<span class="comment">// Respond with number.</span>
+<span class="ident">responder</span>.<span class="ident">try_respond</span>().<span class="ident">unwrap</span>().<span class="ident">send</span>(<span class="number">5</span>);
+
+<span class="comment">// Receive and print number.</span>
+<span class="macro">println</span><span class="macro">!</span>(<span class="string">&quot;Number is {}&quot;</span>, <span class="ident">request_contract</span>.<span class="ident">try_receive</span>().<span class="ident">unwrap</span>());</pre>
+
+<h2 id='more-complex-example' class='section-header'><a href='#more-complex-example'>More Complex Example</a></h2>
+<p>This more complex example demonstrates more &quot;real-world&quot; usage.
+One thread requests a &#39;task&#39; (i.e. a closure to run), and the
+other two threads fight over who gets to respond with their
+own personal task. Meanwhile, the requesting thread is polling
+for a task, and if it gets one in time, it runs it. Regardless of
+whether or not the receiver got a task or timed out, the receiver
+notifies other threads to stop running, and stops itself.</p>
+
+<pre class="rust rust-example-rendered">
+<span class="kw">extern</span> <span class="kw">crate</span> <span class="ident">reqchan</span> <span class="kw">as</span> <span class="ident">chan</span>;
+ 
+<span class="kw">use</span> <span class="ident">std</span>::<span class="ident">sync</span>::<span class="ident">Arc</span>;
+<span class="kw">use</span> <span class="ident">std</span>::<span class="ident">sync</span>::<span class="ident">atomic</span>::{<span class="ident">AtomicBool</span>, <span class="ident">AtomicUsize</span>, <span class="ident">Ordering</span>};
+<span class="kw">use</span> <span class="ident">std</span>::<span class="ident">thread</span>;
+<span class="kw">use</span> <span class="ident">std</span>::<span class="ident">time</span>::{<span class="ident">Duration</span>, <span class="ident">Instant</span>};
+ 
+<span class="comment">// Stuff to make it easier to pass around closures.</span>
+<span class="kw">trait</span> <span class="ident">FnBox</span> {
+    <span class="kw">fn</span> <span class="ident">call_box</span>(<span class="self">self</span>: <span class="ident">Box</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span>);
+}
+<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">F</span>: <span class="ident">FnOnce</span>()<span class="op">&gt;</span> <span class="ident">FnBox</span> <span class="kw">for</span> <span class="ident">F</span> {
+    <span class="kw">fn</span> <span class="ident">call_box</span>(<span class="self">self</span>: <span class="ident">Box</span><span class="op">&lt;</span><span class="ident">F</span><span class="op">&gt;</span>) {
+        (<span class="kw-2">*</span><span class="self">self</span>)()
+    }
+}
+<span class="kw">type</span> <span class="ident">Task</span> <span class="op">=</span> <span class="ident">Box</span><span class="op">&lt;</span><span class="ident">FnBox</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="lifetime">&#39;static</span><span class="op">&gt;</span>;
+ 
+<span class="comment">// Variable used to test calling a `Task` sent between threads.</span>
+<span class="kw">let</span> <span class="ident">test_var</span> <span class="op">=</span> <span class="ident">Arc</span>::<span class="ident">new</span>(<span class="ident">AtomicUsize</span>::<span class="ident">new</span>(<span class="number">0</span>));
+<span class="kw">let</span> <span class="ident">test_var2</span> <span class="op">=</span> <span class="ident">test_var</span>.<span class="ident">clone</span>();
+<span class="kw">let</span> <span class="ident">test_var3</span> <span class="op">=</span> <span class="ident">test_var</span>.<span class="ident">clone</span>();
+ 
+<span class="comment">// Variable needed to stop `responder` thread if `requester` times out</span>
+<span class="kw">let</span> <span class="ident">should_exit</span> <span class="op">=</span> <span class="ident">Arc</span>::<span class="ident">new</span>(<span class="ident">AtomicBool</span>::<span class="ident">new</span>(<span class="bool-val">false</span>));
+<span class="kw">let</span> <span class="ident">should_exit_copy_1</span> <span class="op">=</span> <span class="ident">should_exit</span>.<span class="ident">clone</span>();
+<span class="kw">let</span> <span class="ident">should_exit_copy_2</span> <span class="op">=</span> <span class="ident">should_exit</span>.<span class="ident">clone</span>();
+ 
+<span class="kw">let</span> (<span class="ident">requester</span>, <span class="ident">responder</span>) <span class="op">=</span> <span class="ident">chan</span>::<span class="ident">channel</span>::<span class="op">&lt;</span><span class="ident">Task</span><span class="op">&gt;</span>();
+<span class="kw">let</span> <span class="ident">responder2</span> <span class="op">=</span> <span class="ident">responder</span>.<span class="ident">clone</span>();
+ 
+<span class="comment">// requesting thread</span>
+<span class="kw">let</span> <span class="ident">requester_handle</span> <span class="op">=</span> <span class="ident">thread</span>::<span class="ident">spawn</span>(<span class="kw">move</span> <span class="op">||</span> {
+    <span class="kw">let</span> <span class="ident">start_time</span> <span class="op">=</span> <span class="ident">Instant</span>::<span class="ident">now</span>();
+    <span class="kw">let</span> <span class="ident">timeout</span> <span class="op">=</span> <span class="ident">Duration</span>::<span class="ident">new</span>(<span class="number">0</span>, <span class="number">1000000</span>);
+     
+    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">contract</span> <span class="op">=</span> <span class="ident">requester</span>.<span class="ident">try_request</span>().<span class="ident">unwrap</span>();
+ 
+    <span class="kw">loop</span> {
+        <span class="comment">// Try to cancel request and stop threads if runtime</span>
+        <span class="comment">// has exceeded `timeout`.</span>
+        <span class="kw">if</span> <span class="ident">start_time</span>.<span class="ident">elapsed</span>() <span class="op">&gt;=</span> <span class="ident">timeout</span> {
+            <span class="comment">// Try to cancel request.</span>
+            <span class="comment">// This should only fail if `responder` has started responding.</span>
+            <span class="kw">if</span> <span class="ident">contract</span>.<span class="ident">try_cancel</span>() {
+                <span class="comment">// Notify other threads to stop.</span>
+                <span class="ident">should_exit</span>.<span class="ident">store</span>(<span class="bool-val">true</span>, <span class="ident">Ordering</span>::<span class="ident">SeqCst</span>);
+                <span class="kw">break</span>;
+            }
+        }
+ 
+        <span class="comment">// Try getting `task` from `responder`.</span>
+        <span class="kw">match</span> <span class="ident">contract</span>.<span class="ident">try_receive</span>() {
+            <span class="comment">// `contract` received `task`.</span>
+            <span class="prelude-val">Ok</span>(<span class="ident">task</span>) <span class="op">=&gt;</span> {
+                <span class="ident">task</span>.<span class="ident">call_box</span>();
+                <span class="comment">// Notify other threads to stop.</span>
+                <span class="ident">should_exit</span>.<span class="ident">store</span>(<span class="bool-val">true</span>, <span class="ident">Ordering</span>::<span class="ident">SeqCst</span>);
+                <span class="kw">break</span>;
+            },
+            <span class="comment">// Continue looping if `responder` has not yet sent `task`.</span>
+            <span class="prelude-val">Err</span>(<span class="ident">chan</span>::<span class="ident">TryReceiveError</span>::<span class="ident">Empty</span>) <span class="op">=&gt;</span> {},
+            <span class="comment">// The only other error is `chan::TryReceiveError::Done`.</span>
+            <span class="comment">// This only happens if we call `contract.try_receive()`</span>
+            <span class="comment">// after either receiving data or cancelling the request.</span>
+            _ <span class="op">=&gt;</span> <span class="macro">unreachable</span><span class="macro">!</span>(),
+        }
+    }
+});
+ 
+<span class="comment">// responding thread 1</span>
+<span class="kw">let</span> <span class="ident">responder_1_handle</span> <span class="op">=</span> <span class="ident">thread</span>::<span class="ident">spawn</span>(<span class="kw">move</span> <span class="op">||</span> {
+    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">tasks</span> <span class="op">=</span> <span class="macro">vec</span><span class="macro">!</span>[<span class="ident">Box</span>::<span class="ident">new</span>(<span class="kw">move</span> <span class="op">||</span> {
+        <span class="ident">test_var2</span>.<span class="ident">fetch_add</span>(<span class="number">1</span>, <span class="ident">Ordering</span>::<span class="ident">SeqCst</span>);
+    }) <span class="kw">as</span> <span class="ident">Task</span>];
+     
+    <span class="kw">loop</span> {
+        <span class="comment">// Exit loop if `receiver` has timed out.</span>
+        <span class="kw">if</span> <span class="ident">should_exit_copy_1</span>.<span class="ident">load</span>(<span class="ident">Ordering</span>::<span class="ident">SeqCst</span>) {
+            <span class="kw">break</span>;
+        }
+         
+        <span class="comment">// Send `task` to `receiver` if it has issued a request.</span>
+        <span class="kw">match</span> <span class="ident">responder2</span>.<span class="ident">try_respond</span>() {
+            <span class="comment">// `responder2` can respond to request.</span>
+            <span class="prelude-val">Ok</span>(<span class="ident">contract</span>) <span class="op">=&gt;</span> {
+                <span class="ident">contract</span>.<span class="ident">send</span>(<span class="ident">tasks</span>.<span class="ident">pop</span>().<span class="ident">unwrap</span>());
+                <span class="kw">break</span>;
+            },
+            <span class="comment">// Either `requester` has not yet made a request,</span>
+            <span class="comment">// or `responder2` already handled the request.</span>
+            <span class="prelude-val">Err</span>(<span class="ident">chan</span>::<span class="ident">TryRespondError</span>::<span class="ident">NoRequest</span>) <span class="op">=&gt;</span> {},
+            <span class="comment">// `responder2` is processing request..</span>
+            <span class="prelude-val">Err</span>(<span class="ident">chan</span>::<span class="ident">TryRespondError</span>::<span class="ident">Locked</span>) <span class="op">=&gt;</span> { <span class="kw">break</span>; },
+        }
+    }
+});
+ 
+<span class="comment">// responding thread 2</span>
+<span class="kw">let</span> <span class="ident">responder_2_handle</span> <span class="op">=</span> <span class="ident">thread</span>::<span class="ident">spawn</span>(<span class="kw">move</span> <span class="op">||</span> {
+    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">tasks</span> <span class="op">=</span> <span class="macro">vec</span><span class="macro">!</span>[<span class="ident">Box</span>::<span class="ident">new</span>(<span class="kw">move</span> <span class="op">||</span> {
+        <span class="ident">test_var3</span>.<span class="ident">fetch_add</span>(<span class="number">2</span>, <span class="ident">Ordering</span>::<span class="ident">SeqCst</span>);
+    }) <span class="kw">as</span> <span class="ident">Task</span>];
+     
+    <span class="kw">loop</span> {
+        <span class="comment">// Exit loop if `receiver` has timed out.</span>
+        <span class="kw">if</span> <span class="ident">should_exit_copy_2</span>.<span class="ident">load</span>(<span class="ident">Ordering</span>::<span class="ident">SeqCst</span>) {
+            <span class="kw">break</span>;
+        }
+         
+        <span class="comment">// Send `task` to `receiver` if it has issued a request.</span>
+        <span class="kw">match</span> <span class="ident">responder</span>.<span class="ident">try_respond</span>() {
+            <span class="comment">// `responder2` can respond to request.</span>
+            <span class="prelude-val">Ok</span>(<span class="ident">contract</span>) <span class="op">=&gt;</span> {
+                <span class="ident">contract</span>.<span class="ident">send</span>(<span class="ident">tasks</span>.<span class="ident">pop</span>().<span class="ident">unwrap</span>());
+                <span class="kw">break</span>;
+            },
+            <span class="comment">// Either `requester` has not yet made a request,</span>
+            <span class="comment">// or `responder` already handled the request.</span>
+            <span class="prelude-val">Err</span>(<span class="ident">chan</span>::<span class="ident">TryRespondError</span>::<span class="ident">NoRequest</span>) <span class="op">=&gt;</span> {},
+            <span class="comment">// `responder` is processing request.</span>
+            <span class="prelude-val">Err</span>(<span class="ident">chan</span>::<span class="ident">TryRespondError</span>::<span class="ident">Locked</span>) <span class="op">=&gt;</span> { <span class="kw">break</span>; },
+        }
+    }
+});
+ 
+<span class="ident">requester_handle</span>.<span class="ident">join</span>().<span class="ident">unwrap</span>();
+<span class="ident">responder_1_handle</span>.<span class="ident">join</span>().<span class="ident">unwrap</span>();
+<span class="ident">responder_2_handle</span>.<span class="ident">join</span>().<span class="ident">unwrap</span>();
+
+<span class="comment">// `num` can be 0, 1 or 2.</span>
+<span class="kw">let</span> <span class="ident">num</span> <span class="op">=</span> <span class="ident">test_var</span>.<span class="ident">load</span>(<span class="ident">Ordering</span>::<span class="ident">SeqCst</span>);
+<span class="macro">println</span><span class="macro">!</span>(<span class="string">&quot;Number is {}&quot;</span>, <span class="ident">num</span>);</pre>
+</div><h2 id='structs' class='section-header'><a href="#structs">Structs</a></h2>
+<table>
+                       <tr class=' module-item'>
+                           <td><a class="struct" href="struct.RequestContract.html"
+                                  title='struct reqchan::RequestContract'>RequestContract</a></td>
+                           <td class='docblock-short'>
+                                <p>This is the contract returned by a successful <code>Requester::try_request()</code>.
+It represents the caller&#39;s exclusive access to the requesting side of
+the channel. The user can either try to get a datum from the responding side
+or <em>attempt</em> to cancel the request. To prevent data loss, <code>RequestContract</code>
+will panic if the user has not received a datum or cancelled the request.</p>
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="struct" href="struct.Requester.html"
+                                  title='struct reqchan::Requester'>Requester</a></td>
+                           <td class='docblock-short'>
+                                <p>This end of the channel requests and receives data from its <code>Responder</code>(s).</p>
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="struct" href="struct.Responder.html"
+                                  title='struct reqchan::Responder'>Responder</a></td>
+                           <td class='docblock-short'>
+                                <p>This end of the channel sends data in response to requests from
+its <code>Requester</code>.</p>
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="struct" href="struct.ResponseContract.html"
+                                  title='struct reqchan::ResponseContract'>ResponseContract</a></td>
+                           <td class='docblock-short'>
+                                <p>This is the contract returned by a successful <code>Responder::try_response()</code>.
+It represents the caller&#39;s exclusive access to the responding side of
+the channel. It ensures the user sends a datum by panicking if they have not.</p>
+                           </td>
+                       </tr></table><h2 id='enums' class='section-header'><a href="#enums">Enums</a></h2>
+<table>
+                       <tr class=' module-item'>
+                           <td><a class="enum" href="enum.TryReceiveError.html"
+                                  title='enum reqchan::TryReceiveError'>TryReceiveError</a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="enum" href="enum.TryRequestError.html"
+                                  title='enum reqchan::TryRequestError'>TryRequestError</a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="enum" href="enum.TryRespondError.html"
+                                  title='enum reqchan::TryRespondError'>TryRespondError</a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr></table><h2 id='functions' class='section-header'><a href="#functions">Functions</a></h2>
+<table>
+                       <tr class=' module-item'>
+                           <td><a class="fn" href="fn.channel.html"
+                                  title='fn reqchan::channel'>channel</a></td>
+                           <td class='docblock-short'>
+                                <p>This function creates a <code>reqchan</code> and returns a tuple containing the
+two ends of this bidirectional request-&gt;response channel.</p>
+                           </td>
+                       </tr></table></section>
+    <section id='search' class="content hidden"></section>
+
+    <section class="footer"></section>
+
+    <aside id="help" class="hidden">
+        <div>
+            <h1 class="hidden">Help</h1>
+
+            <div class="shortcuts">
+                <h2>Keyboard Shortcuts</h2>
+
+                <dl>
+                    <dt>?</dt>
+                    <dd>Show this help dialog</dd>
+                    <dt>S</dt>
+                    <dd>Focus the search field</dd>
+                    <dt>&larrb;</dt>
+                    <dd>Move up in search results</dd>
+                    <dt>&rarrb;</dt>
+                    <dd>Move down in search results</dd>
+                    <dt>&#9166;</dt>
+                    <dd>Go to active search result</dd>
+                    <dt>+</dt>
+                    <dd>Collapse/expand all sections</dd>
+                </dl>
+            </div>
+
+            <div class="infos">
+                <h2>Search Tricks</h2>
+
+                <p>
+                    Prefix searches with a type followed by a colon (e.g.
+                    <code>fn:</code>) to restrict the search to a given type.
+                </p>
+
+                <p>
+                    Accepted types are: <code>fn</code>, <code>mod</code>,
+                    <code>struct</code>, <code>enum</code>,
+                    <code>trait</code>, <code>type</code>, <code>macro</code>,
+                    and <code>const</code>.
+                </p>
+
+                <p>
+                    Search functions by type signature (e.g.
+                    <code>vec -> usize</code> or <code>* -> vec</code>)
+                </p>
+            </div>
+        </div>
+    </aside>
+
+    
+
+    <script>
+        window.rootPath = "../";
+        window.currentCrate = "reqchan";
+    </script>
+    <script src="../main.js"></script>
+    <script defer src="../search-index.js"></script>
+</body>
+</html>
