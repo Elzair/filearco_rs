@@ -82,6 +82,7 @@ pub fn get(base_path: &Path) -> Result<FileData> {
     })
 }
 
+#[derive(Clone)]
 pub struct FileData {
     base_path: PathBuf,
     data: Vec<FileDatum>,
@@ -109,6 +110,7 @@ impl FileData {
     }
 }
 
+#[derive(Clone)]
 pub struct FileDatum {
     name: String,
     length: u64,

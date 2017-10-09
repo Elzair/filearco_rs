@@ -459,10 +459,11 @@ mod tests {
 
     #[test]
     fn test_v1_fileentry_as_slice() {
+        let dir_path = Path::new("testarchives/simple");
         let archive_path = Path::new("testarchives/simple_v1.fac");
         let archive = FileArco::new(&archive_path).ok().unwrap();
 
-        let simple = get_file_data_stub(Path::new("testarchives/simple")).ok().unwrap();
+        let simple = get_file_data_stub(&dir_path).ok().unwrap();
         let base_path = simple.path();
         let svec = simple.into_vec();
 
@@ -476,15 +477,15 @@ mod tests {
 
             // Read in input file contents.
             let mut in_file = File::open(full_path).ok().unwrap();
-            let mut contents1 = Vec::<u8>::with_capacity(entry.len() as usize); 
-            in_file.read_to_end(&mut contents1).ok().unwrap();
+            let mut contents = Vec::<u8>::with_capacity(entry.len() as usize); 
+            in_file.read_to_end(&mut contents).ok().unwrap();
             
             let archived_file = archive.get(&entry.name()).unwrap();
             let length2 = archived_file.len();
 
             assert_eq!(entry.len(), archived_file.as_slice().len() as u64);
             assert_eq!(length2, archived_file.as_slice().len() as u64);
-            assert_eq!(contents1, archived_file.as_slice());
+            assert_eq!(contents, archived_file.as_slice());
         }
     }
 }
