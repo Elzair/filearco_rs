@@ -5,7 +5,7 @@ use std::io::prelude::*;
 use std::path::Path;
 
 use filearco::get_file_data;
-use filearco::FileArcoV1;
+use filearco::v1::FileArco;
 
 #[test]
 fn test_make_read_v1() {
@@ -15,9 +15,9 @@ fn test_make_read_v1() {
     let file_data = get_file_data(&dir_path).ok().unwrap();
     let file_data_copy = file_data.clone();
 
-    FileArcoV1::make(file_data, &archive_path).ok().unwrap();
+    FileArco::make(file_data, &archive_path).ok().unwrap();
 
-    let archive = FileArcoV1::new(&archive_path).ok().unwrap();
+    let archive = FileArco::new(&archive_path).ok().unwrap();
 
     let datums = file_data_copy.into_vec();
 

@@ -6,6 +6,25 @@ use std::path::{Path, PathBuf};
 use crc::crc64::checksum_iso as checksum;
 use walkdir::WalkDir;
     
+/// This function retrieves basic information (i.e. path, length and checksum)
+/// of all files under a specific `base_path`.
+///
+/// **NOTE:** All file paths are relative to `base_dir`
+///
+/// # Arguments
+///
+/// * base_path - the path of a *directory* to list.
+///
+/// # Example
+///
+/// ```rust
+/// extern crate filearco;
+///
+/// use std::path::Path;
+///
+/// let path = Path::new("testarchives/simple");
+/// let file_data = filearco::get_file_data(&path).unwrap();
+/// ```
 pub fn get(base_path: &Path) -> Result<FileData> {
     if !base_path.is_dir() {
         return Err(Error::new(ErrorKind::InvalidInput,
@@ -82,6 +101,7 @@ pub fn get(base_path: &Path) -> Result<FileData> {
     })
 }
 
+/// This struct contains information on all the normal files in a given location.
 #[derive(Clone)]
 pub struct FileData {
     base_path: PathBuf,
@@ -89,6 +109,8 @@ pub struct FileData {
 }
 
 impl FileData {
+    // This is needed for unit tests in v1.rs so the fields of
+    // `FileData` do not have to be public.
     #[cfg(test)]
     pub fn new(base_path: PathBuf, data: Vec<FileDatum>) -> Self {
         FileData {
@@ -110,6 +132,7 @@ impl FileData {
     }
 }
 
+/// This struct contains basic information about a file.
 #[derive(Clone)]
 pub struct FileDatum {
     name: String,
@@ -118,6 +141,8 @@ pub struct FileDatum {
 }
 
 impl FileDatum {
+    // This is needed for unit tests in v1.rs so the fields of
+    // `FileDatum` do not have to be public.
     #[cfg(test)]
     pub fn new(name: String, length: u64, checksum: u64) -> Self {
         FileDatum {

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs::{File, create_dir_all};
 use std::io::prelude::*;
 use std::io::{Result, Error, ErrorKind};
-use std::mem::{transmute, transmute_copy};
+use std::mem;
 use std::slice;
 use std::sync::Arc;
 use std::path::Path;
@@ -18,11 +18,29 @@ use file_data::FileData;
 
 const VERSION_NUMBER: u64 = 1;
 
+/// This represents an open, memory-mapped FileArco v1 archive file.
 pub struct FileArco {
     inner: Arc<Inner>,
 }
 
 impl FileArco {
+    /// This method tries to map a file specified by `path` into memory
+    /// and process it as a FileArco V1 archive file.
+    ///
+    /// # Arguments
+    ///
+    /// * path - file path of archive file
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// extern crate filearco;
+    ///
+    /// use std::path::Path;
+    ///
+    /// let path = Path::new("testarchives/simple_v1.fac");
+    /// let file_data = filearco::v1::FileArco::new(&path).unwrap(); 
+    /// ```
     pub fn new(path: &Path) -> Result<Self> {
         const U64S: usize = 8; // constant of mem::size_of::<u64>()
         const NUM_TOP_FIELDS: u64 = 4;
@@ -37,8 +55,8 @@ impl FileArco {
 
         let magic_number: u64 = unsafe {
             let ptr = map.ptr().offset(0);
-            let s = transmute::<*const u8, &[u8; U64S]>(ptr);
-            transmute_copy::<[u8; U64S], u64>(s)
+            let s = mem::transmute::<*const u8, &[u8; U64S]>(ptr);
+            mem::transmute_copy::<[u8; U64S], u64>(s)
         };
 
         if magic_number != FILEARCO_MAGIC_NUMBER {
@@ -47,8 +65,8 @@ impl FileArco {
 
         let version_number: u64 = unsafe {
             let ptr = map.ptr().offset(U64S as isize);
-            let s = transmute::<*const u8, &[u8; U64S]>(ptr);
-            transmute_copy::<[u8; U64S], u64>(s)
+            let s = mem::transmute::<*const u8, &[u8; U64S]>(ptr);
+            mem::transmute_copy::<[u8; U64S], u64>(s)
         };
 
         if version_number != 1 {
@@ -57,14 +75,14 @@ impl FileArco {
 
         let header_length: u64 = unsafe {
             let ptr = map.ptr().offset((2 * U64S) as isize);
-            let s = transmute::<*const u8, &[u8; U64S]>(ptr);
-            transmute_copy::<[u8; U64S], u64>(s)
+            let s = mem::transmute::<*const u8, &[u8; U64S]>(ptr);
+            mem::transmute_copy::<[u8; U64S], u64>(s)
         };
 
         let header_checksum: u64 = unsafe {
             let ptr = map.ptr().offset((3 * U64S) as isize);
-            let s = transmute::<*const u8, &[u8; U64S]>(ptr);
-            transmute_copy::<[u8; U64S], u64>(s)
+            let s = mem::transmute::<*const u8, &[u8; U64S]>(ptr);
+            mem::transmute_copy::<[u8; U64S], u64>(s)
         };
 
         // Read in header.
@@ -126,6 +144,24 @@ impl FileArco {
         })
     }
 
+    /// This method retrieves a file from the archive, if it exists.
+    ///
+    /// # Arguments
+    ///
+    /// * file_path - name of file to retrieve
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// extern crate filearco;
+    ///
+    /// use std::path::Path;
+    ///
+    /// let path = Path::new("testarchives/simple_v1.fac");
+    /// let file_data = filearco::v1::FileArco::new(&path).unwrap(); 
+    /// 
+    /// let cargo_toml = file_data.get("Cargo.toml").unwrap();
+    /// ```
     pub fn get(&self, file_path: &str) -> Option<FileRef> {
         if let Some(entry) = self.inner.entries.files.get(file_path) {
             let offset = (self.inner.file_offset + entry.offset) as isize;
@@ -184,28 +220,28 @@ impl FileArco {
         // Write file identification number to archive.
         let magic_number = FILEARCO_MAGIC_NUMBER;
         let magic_number_encoded = unsafe {
-            transmute::<u64, [u8; U64S]>(magic_number)
+            mem::transmute::<u64, [u8; U64S]>(magic_number)
         };
         out_file.write_all(&magic_number_encoded)?;
 
         // Write version number to archive.
         let version_number = VERSION_NUMBER;
         let version_number_encoded = unsafe {
-            transmute::<u64, [u8; U64S]>(version_number)
+            mem::transmute::<u64, [u8; U64S]>(version_number)
         };
         out_file.write_all(&version_number_encoded)?;
 
         // Write header length to archive.
         let header_length = header_encoded.len() as u64;
         let header_length_encoded = unsafe {
-            transmute::<u64, [u8; U64S]>(header_length)
+            mem::transmute::<u64, [u8; U64S]>(header_length)
         };
         out_file.write_all(&header_length_encoded)?;
 
         // Write header checksum to archive.
         let header_checksum = checksum(&header_encoded);
         let header_checksum_encoded = unsafe {
-            transmute::<u64, [u8; U64S]>(header_checksum)
+            mem::transmute::<u64, [u8; U64S]>(header_checksum)
         };
         out_file.write_all(&header_checksum_encoded)?;
 
@@ -256,6 +292,22 @@ pub struct FileRef {
 }
 
 impl FileRef {
+    /// This method ensures the file contents have not been corrupted.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// extern crate filearco;
+    ///
+    /// use std::mem;
+    /// use std::path::Path;
+    ///
+    /// let path = Path::new("testarchives/simple_v1.fac");
+    /// let file_data = filearco::v1::FileArco::new(&path).unwrap(); 
+    /// 
+    /// let cargo_toml = file_data.get("Cargo.toml").unwrap();
+    /// assert!(cargo_toml.is_valid());
+    /// ```
     pub fn is_valid(&self) -> bool {
         let sl = self.as_slice();
 
@@ -263,13 +315,75 @@ impl FileRef {
 
         self.checksum == checksum_computed
     }
-    
+ 
+    /// This method retrieves a byte array representing the contents of a `FileRef`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// extern crate filearco;
+    ///
+    /// use std::mem;
+    /// use std::path::Path;
+    ///
+    /// let path = Path::new("testarchives/simple_v1.fac");
+    /// let file_data = filearco::v1::FileArco::new(&path).unwrap(); 
+    /// 
+    /// let cargo_toml = file_data.get("Cargo.toml").unwrap();
+    /// let cargo_toml_slice = cargo_toml.as_slice();
+    /// let cargo_toml_text = unsafe { mem::transmute::<&[u8], &str>(cargo_toml_slice) };
+    /// println!("{}", cargo_toml_text);
+    /// ```
     pub fn as_slice(&self) -> &[u8] {
         unsafe {
             slice::from_raw_parts(self.address, self.length as usize)
         }
     }
+ 
+    /// This method retrieves a string representing the contents of a `FileRef`.
+    ///
+    /// # Unsafety
+    ///
+    /// The caller must ensure that the retrieved file is a valid UTF-8
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// extern crate filearco;
+    ///
+    /// use std::mem;
+    /// use std::path::Path;
+    ///
+    /// let path = Path::new("testarchives/simple_v1.fac");
+    /// let file_data = filearco::v1::FileArco::new(&path).unwrap(); 
+    /// 
+    /// let license = file_data.get("LICENSE-APACHE").unwrap();
+    /// let license_text = license.as_str();
+    /// println!("{}", license_text);
+    /// ```
+    pub fn as_str(&self) -> &str {
+        unsafe {
+            let sl = slice::from_raw_parts(self.address, self.length as usize);
+            mem::transmute::<&[u8], &str>(sl)
+        }
+    }
 
+    /// This method retrieves the length of the file.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// extern crate filearco;
+    ///
+    /// use std::mem;
+    /// use std::path::Path;
+    ///
+    /// let path = Path::new("testarchives/simple_v1.fac");
+    /// let file_data = filearco::v1::FileArco::new(&path).unwrap(); 
+    /// 
+    /// let cargo_toml = file_data.get("Cargo.toml").unwrap();
+    /// println!("File length: {}", cargo_toml.len());
+    /// ```
     pub fn len(&self) -> u64 {
         self.length
     }
