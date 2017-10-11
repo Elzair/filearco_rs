@@ -25,15 +25,15 @@ pub struct FileArco {
 impl FileArco {
     pub fn new(path: &Path) -> Result<Self> {
         const U64S: usize = 8; // constant of mem::size_of::<u64>()
-        const NUM_HEADER_FIELDS: u64 = 6;
+        const NUM_TOP_FIELDS: u64 = 4;
 
         let map = Mmap::open_path(path, Protection::Read)?;
 
-        if map.len() < (NUM_HEADER_FIELDS as usize) * U64S {
-            return Err(Error::new(ErrorKind::InvalidData, "File too small for header!"));
+        if map.len() < (NUM_TOP_FIELDS as usize) * U64S {
+            return Err(Error::new(ErrorKind::InvalidData, "File too small for FileArchoV1!"));
         }
 
-        // Read in header data.
+        // Read in initial data.
 
         let magic_number: u64 = unsafe {
             let ptr = map.ptr().offset(0);
@@ -55,47 +55,60 @@ impl FileArco {
             return Err(Error::new(ErrorKind::InvalidData, "Not FileArcho v1 archive!"));
         }
 
-        let page_size: u64 = unsafe {
+        let header_length: u64 = unsafe {
             let ptr = map.ptr().offset((2 * U64S) as isize);
             let s = transmute::<*const u8, &[u8; U64S]>(ptr);
             transmute_copy::<[u8; U64S], u64>(s)
         };
 
-        let should_prefetch = page_size == (get_page_size() as u64);
- 
-        let entries_length: u64 = unsafe {
+        let header_checksum: u64 = unsafe {
             let ptr = map.ptr().offset((3 * U64S) as isize);
             let s = transmute::<*const u8, &[u8; U64S]>(ptr);
             transmute_copy::<[u8; U64S], u64>(s)
         };
-       
-        let file_offset: u64 = unsafe {
-            let ptr = map.ptr().offset((4 * U64S) as isize);
-            let s = transmute::<*const u8, &[u8; U64S]>(ptr);
-            transmute_copy::<[u8; U64S], u64>(s)
+
+        // Read in header.
+
+        if map.len() < (NUM_TOP_FIELDS as usize) * U64S + (header_length as usize) {
+            return Err(Error::new(ErrorKind::InvalidData,
+                                  "File is too small for FileArcho v1 header!"));
+        }
+
+        let header: Header = unsafe {
+            let ptr = map.ptr().offset(((NUM_TOP_FIELDS as usize) * U64S) as isize);
+            let s = slice::from_raw_parts(ptr, header_length as usize);
+
+            // Ensure entries table is valid.
+            let test_checksum = checksum(&s);
+
+            if test_checksum != header_checksum {
+                return Err(Error::new(ErrorKind::InvalidData,
+                                      "Header has been corrupted!"));
+            }
+
+            deserialize(s).unwrap()
         };
-       
-        let entries_checksum: u64 = unsafe {
-            let ptr = map.ptr().offset((5 * U64S) as isize);
-            let s = transmute::<*const u8, &[u8; U64S]>(ptr);
-            transmute_copy::<[u8; U64S], u64>(s)
-        };
+
+        let should_prefetch = header.page_size == (get_page_size() as u64);
 
         // Read in entries data.
 
-        if map.len() < (NUM_HEADER_FIELDS as usize) * U64S + (entries_length as usize) {
+        if map.len() < ((NUM_TOP_FIELDS as usize) * U64S +
+                        (header_length as usize) +
+                        (header.entries_length as usize)) {
             return Err(Error::new(ErrorKind::InvalidData,
                                   "File is too small for entries table!"));
         }
 
         let entries = unsafe {
-            let ptr = map.ptr().offset(((NUM_HEADER_FIELDS as usize) * U64S) as isize);
-            let s = slice::from_raw_parts(ptr, entries_length as usize);
+            let offset = NUM_TOP_FIELDS * (U64S as u64) + header_length;
+            let ptr = map.ptr().offset(offset as isize);
+            let s = slice::from_raw_parts(ptr, header.entries_length as usize);
 
             // Ensure entries table is valid.
             let test_checksum = checksum(&s);
 
-            if test_checksum != entries_checksum {
+            if test_checksum != header.entries_checksum {
                 return Err(Error::new(ErrorKind::InvalidData,
                                       "Entries table has been corrupted!"));
             }
@@ -105,7 +118,7 @@ impl FileArco {
 
         Ok(FileArco {
             inner: Arc::new(Inner {
-                file_offset: file_offset,
+                file_offset: header.file_offset,
                 entries: entries,
                 should_prefetch: should_prefetch,
                 map: map,
@@ -131,7 +144,6 @@ impl FileArco {
                 address: address,
                 length: entry.length,
                 aligned_length: entry.aligned_length,
-                // offset: offset,
                 checksum: entry.checksum,
                 should_advise: self.inner.should_prefetch,
                 inner: self.inner.clone(),
@@ -144,7 +156,7 @@ impl FileArco {
     
     pub fn make(file_data: FileData, out_path: &Path) -> Result<()> {
         const U64S: usize = 8; // constant of mem::size_of::<u64>()
-        const NUM_HEADER_FIELDS: u64 = 6;
+        const NUM_TOP_FIELDS: u64 = 4;
 
         // Create output directories if they do not already exist.
         #[allow(unused_variables)]
@@ -158,8 +170,15 @@ impl FileArco {
         // Create entries table and serialize it.
         let entries = Entries::new(file_data)?;
         let entries_encoded: Vec<u8> = serialize(&entries, Infinite).unwrap();
+
+        // Create header and serialize it.
+        let header = Header::new(get_page_size() as u64,
+                                 NUM_TOP_FIELDS * (U64S as u64),
+                                 entries_encoded.len() as u64,
+                                 checksum(&entries_encoded));
+        let header_encoded = serialize(&header, Infinite).unwrap();
   
-        // Create output archive
+        // Create output archive.
         let mut out_file = File::create(out_path)?;
 
         // Write file identification number to archive.
@@ -176,41 +195,30 @@ impl FileArco {
         };
         out_file.write_all(&version_number_encoded)?;
 
-        // Write memory page size of current system to archive.
-        let page_size = get_page_size() as u64;
-        let page_size_encoded = unsafe {
-            transmute::<u64, [u8; U64S]>(page_size)
+        // Write header length to archive.
+        let header_length = header_encoded.len() as u64;
+        let header_length_encoded = unsafe {
+            transmute::<u64, [u8; U64S]>(header_length)
         };
-        out_file.write_all(&page_size_encoded)?;
+        out_file.write_all(&header_length_encoded)?;
 
-        // Write size of entries table (in bytes) to archive.
-        let entries_length = entries_encoded.len() as u64;
-        let entries_length_encoded = unsafe {
-            transmute_copy::<u64, [u8; U64S]>(&entries_length)
+        // Write header checksum to archive.
+        let header_checksum = checksum(&header_encoded);
+        let header_checksum_encoded = unsafe {
+            transmute::<u64, [u8; U64S]>(header_checksum)
         };
-        out_file.write_all(&entries_length_encoded)?;
+        out_file.write_all(&header_checksum_encoded)?;
 
-        // Write offset to first file (in bytes) to archive.
-        let file_offset = get_aligned_length(NUM_HEADER_FIELDS * (U64S as u64) +
-                                             entries_length);
-        let file_offset_encoded = unsafe {
-            transmute_copy::<u64, [u8; U64S]>(&file_offset)
-        };
-        out_file.write_all(&file_offset_encoded)?;
-
-        // Compute and write out CRC64 checksum of serialized entries table.
-        let entries_checksum = checksum(&entries_encoded);
-        let entries_checksum_encoded = unsafe {
-            transmute_copy::<u64, [u8; U64S]>(&entries_checksum)
-        };
-        out_file.write_all(&entries_checksum_encoded)?;
-
+        // Write serialized header to archive.
+        out_file.write_all(&header_encoded)?;
+        
         // Write out serialized entries table.
         out_file.write_all(&entries_encoded)?;
 
         // Pad archive with zeros to ensure files begin at a multiple of `page_size`.
-        let padding_length = file_offset - (NUM_HEADER_FIELDS * (U64S as u64) +
-                                            entries_length);
+        let padding_length = header.file_offset - (NUM_TOP_FIELDS * (U64S as u64) +
+                                                   header_length +    
+                                                   header.entries_length);
         let padding: Vec<u8> = vec![0u8; padding_length as usize];
 
         out_file.write_all(&padding)?;
@@ -235,11 +243,11 @@ impl FileArco {
     }
 }
 
+#[allow(dead_code)]
 pub struct FileRef {
     address: *const u8,
     length: u64,
     aligned_length: u64,
-    // offset: isize,
     checksum: u64,
     should_advise: bool,
     // Holding a reference to the memory mapped file ensures it will not be
@@ -282,6 +290,41 @@ struct Inner {
     entries: Entries,
     should_prefetch: bool,
     map: Mmap,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+struct Header {
+    page_size: u64,
+    file_offset: u64,
+    entries_length: u64,
+    entries_checksum: u64,
+}
+
+impl Header {
+    fn new(current_offset: u64,
+           page_size: u64,
+           entries_length: u64,
+           entries_checksum: u64) -> Self {
+        // Serialize test struct to determine `file_offset`.
+        let test_header = Header {
+            page_size: page_size,
+            file_offset: 0,
+            entries_length: entries_length,
+            entries_checksum: entries_checksum,
+        };
+        let test_header_encoded = serialize(&test_header, Infinite).unwrap();
+
+        let file_offset = get_aligned_length(current_offset +
+                                             (test_header_encoded.len() as u64) +
+                                             entries_length);
+
+        Header {
+            page_size: page_size,
+            file_offset: file_offset,
+            entries_length: entries_length,
+            entries_checksum: entries_checksum,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
@@ -434,7 +477,9 @@ mod tests {
                     assert!(archive.inner.entries.files.contains_key(name));
                 }
             },
-            Err(_) => { assert!(false); },
+            Err(err) => {
+                println!("{:?}", err);
+                assert!(false); },
         }
     }
 
