@@ -7,7 +7,6 @@ install:
 script:
   - cargo build --verbose --target "$TARGET"
   - if [ "$RUN" == "1" ]; then cargo test --verbose --target "$TARGET"; fi
-  - if [ "$RUN" == "1" ] && [ "$TRAVIS_RUST_VERSION" == "nightly" ]; then cargo test --verbose --target "$TARGET" --features "no_std"; fi
 
 matrix:
   include:
