@@ -2,7 +2,6 @@
 extern crate bincode;
 extern crate crc;
 extern crate memmap;
-extern crate memadvise;
 extern crate page_size;
 extern crate serde;
 #[macro_use]

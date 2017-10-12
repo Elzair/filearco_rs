@@ -12,7 +12,6 @@ use std::path::Path;
 use bincode::{serialize, deserialize, Infinite};
 use crc::crc64::checksum_iso as checksum;
 use memmap::{Mmap, Protection};
-use memadvise::{Advice, advise};
 use page_size::get as get_page_size;
 
 use super::{Error, FILEARCO_MAGIC_NUMBER, Result};
@@ -108,8 +107,6 @@ impl FileArco {
             deserialize(s).unwrap()
         };
 
-        let should_prefetch = header.page_size == (get_page_size() as u64);
-
         // Read in entries data.
 
         if map.len() < ((NUM_TOP_FIELDS as usize) * U64S +
@@ -137,7 +134,6 @@ impl FileArco {
             inner: Arc::new(Inner {
                 file_offset: header.file_offset,
                 entries: entries,
-                should_prefetch: should_prefetch,
                 map: map,
             })
         })
@@ -166,21 +162,11 @@ impl FileArco {
             let offset = (self.inner.file_offset + entry.offset) as isize;
             let address = unsafe { self.inner.map.ptr().offset(offset) };
 
-            // Advise system to start loading file from disk if it is not
-            // already present.
-            // NOTE: We only do this if the page size is 4 KiB.
-            if self.inner.should_prefetch {
-                advise(address as *mut (),
-                       entry.aligned_length as usize,
-                       Advice::WillNeed).ok().unwrap();
-            }
-
             Some(FileRef {
                 address: address,
                 length: entry.length,
                 aligned_length: entry.aligned_length,
                 checksum: entry.checksum,
-                should_advise: self.inner.should_prefetch,
                 inner: self.inner.clone(),
             })
         }
@@ -207,8 +193,7 @@ impl FileArco {
         let entries_encoded: Vec<u8> = serialize(&entries, Infinite).unwrap();
 
         // Create header and serialize it.
-        let header = Header::new(get_page_size() as u64,
-                                 NUM_TOP_FIELDS * (U64S as u64),
+        let header = Header::new(NUM_TOP_FIELDS * (U64S as u64),
                                  entries_encoded.len() as u64,
                                  checksum(&entries_encoded));
         let header_encoded = serialize(&header, Infinite).unwrap();
@@ -284,7 +269,6 @@ pub struct FileRef {
     length: u64,
     aligned_length: u64,
     checksum: u64,
-    should_advise: bool,
     // Holding a reference to the memory mapped file ensures it will not be
     // unmapped until we finish using it.
     inner: Arc<Inner>,
@@ -388,16 +372,6 @@ impl FileRef {
     }
 }
 
-impl Drop for FileRef {
-    fn drop(&mut self) {
-        if self.should_advise {
-            advise(self.address as *mut (),
-                   self.aligned_length as usize,
-                   Advice::DontNeed).ok().unwrap();
-        }
-    }
-}
-
 /// Error container for handling FileArco v1 archives
 #[derive(Debug)]
 pub enum FileArcoV1Error {
@@ -468,14 +442,12 @@ impl error::Error for FileArcoV1Error {
 struct Inner {
     file_offset: u64,
     entries: Entries,
-    should_prefetch: bool,
     map: Mmap,
 }
 
 #[repr(C)]
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 struct Header {
-    page_size: u64,
     file_offset: u64,
     entries_length: u64,
     entries_checksum: u64,
@@ -483,12 +455,10 @@ struct Header {
 
 impl Header {
     fn new(current_offset: u64,
-           page_size: u64,
            entries_length: u64,
            entries_checksum: u64) -> Self {
         // Serialize test struct to determine `file_offset`.
         let test_header = Header {
-            page_size: page_size,
             file_offset: 0,
             entries_length: entries_length,
             entries_checksum: entries_checksum,
@@ -500,7 +470,6 @@ impl Header {
                                              entries_length);
 
         Header {
-            page_size: page_size,
             file_offset: file_offset,
             entries_length: entries_length,
             entries_checksum: entries_checksum,
