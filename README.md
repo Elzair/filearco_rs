@@ -1,8 +1,7 @@
 [Documentation](https://docs.rs/filearco)
 
 [![Linux Status](https://travis-ci.org/Elzair/filearco_rs.svg?branch=master)](https://travis-ci.org/Elzair/filearcho_rs)
-[![Build status](https://ci.appveyor.com/api/projects/status/yf2d627xup9gnx4e?svg=true)](https://ci.appveyor.com/project/Elzair/filearco)
-
+[![Build status](https://ci.appveyor.com/api/projects/status/gkeu80ru3gq3b7sg?svg=true)](https://ci.appveyor.com/project/Elzair/filearco-rs)
 
 # Introduction
 
@@ -19,7 +18,7 @@ use std::path::Path
 
 fn main() {
     let path = Path::new("archive.fac");
-    let archive = filearco::v1::FileArco::new(&path).unwrap();
+    let archive = filearco::v1::FileArco::new(path).ok().unwrap();
     
     let license = archive.get("LICENSE-MIT").unwrap()
     let license_text = license.as_str().ok().unwrap();
