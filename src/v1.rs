@@ -203,7 +203,7 @@ impl FileArco {
         let base_path = file_data.path();
    
         // Create entries table and serialize it.
-        let entries = Entries::new(file_data)?;
+        let entries = Entries::new(file_data);
         let entries_encoded: Vec<u8> = serialize(&entries, Infinite).unwrap();
 
         // Create header and serialize it.
@@ -514,8 +514,7 @@ struct Entries {
 }
 
 impl Entries {
-    // TODO: Remove Result wrapper since this should not fail
-    fn new(file_data: FileData) -> Result<Self> {
+    fn new(file_data: FileData) -> Self {
         let mut files = HashMap::new();
         
         for datum in file_data.into_vec() {
@@ -540,9 +539,9 @@ impl Entries {
             offset = offset + val.aligned_length;
         }
 
-        Ok(Entries {
+        Entries {
             files: files 
-        })
+        }
     }
 }
 
@@ -620,7 +619,7 @@ mod tests {
     #[test]
     fn test_v1_entries_new() {
         let file_data = get_file_data_stub(&Path::new("testarchives/simple")).ok().unwrap();
-        let entries = Entries::new(file_data).ok().unwrap();
+        let entries = Entries::new(file_data);
 
         let simple = get_simple();
 
