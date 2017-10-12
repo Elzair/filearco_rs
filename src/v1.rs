@@ -1,7 +1,8 @@
 use std::collections::HashMap;
+use std::error;
+use std::fmt;
 use std::fs::{File, create_dir_all};
 use std::io::prelude::*;
-use std::io::{Result, Error, ErrorKind};
 use std::mem;
 use std::slice;
 use std::sync::Arc;
@@ -13,7 +14,7 @@ use memmap::{Mmap, Protection};
 use memadvise::{Advice, advise};
 use page_size::get as get_page_size;
 
-use super::FILEARCO_MAGIC_NUMBER;
+use super::{Error, FILEARCO_MAGIC_NUMBER, Result};
 use file_data::FileData;
 
 const VERSION_NUMBER: u64 = 1;
@@ -48,7 +49,8 @@ impl FileArco {
         let map = Mmap::open_path(path, Protection::Read)?;
 
         if map.len() < (NUM_TOP_FIELDS as usize) * U64S {
-            return Err(Error::new(ErrorKind::InvalidData, "File too small for FileArchoV1!"));
+
+            return Err(Error::FileArcoV1(FileArcoV1Error::FileTooSmall));
         }
 
         // Read in initial data.
@@ -60,7 +62,7 @@ impl FileArco {
         };
 
         if magic_number != FILEARCO_MAGIC_NUMBER {
-            return Err(Error::new(ErrorKind::InvalidData, "Not FileArco archive!"));
+            return Err(Error::FileArcoV1(FileArcoV1Error::NotArchive));
         }
 
         let version_number: u64 = unsafe {
@@ -70,7 +72,7 @@ impl FileArco {
         };
 
         if version_number != 1 {
-            return Err(Error::new(ErrorKind::InvalidData, "Not FileArcho v1 archive!"));
+            return Err(Error::FileArcoV1(FileArcoV1Error::NotArchive));
         }
 
         let header_length: u64 = unsafe {
@@ -88,8 +90,7 @@ impl FileArco {
         // Read in header.
 
         if map.len() < (NUM_TOP_FIELDS as usize) * U64S + (header_length as usize) {
-            return Err(Error::new(ErrorKind::InvalidData,
-                                  "File is too small for FileArcho v1 header!"));
+            return Err(Error::FileArcoV1(FileArcoV1Error::FileTooSmall));
         }
 
         let header: Header = unsafe {
@@ -100,8 +101,7 @@ impl FileArco {
             let test_checksum = checksum(&s);
 
             if test_checksum != header_checksum {
-                return Err(Error::new(ErrorKind::InvalidData,
-                                      "Header has been corrupted!"));
+                return Err(Error::FileArcoV1(FileArcoV1Error::CorruptedHeader));
             }
 
             deserialize(s).unwrap()
@@ -114,8 +114,7 @@ impl FileArco {
         if map.len() < ((NUM_TOP_FIELDS as usize) * U64S +
                         (header_length as usize) +
                         (header.entries_length as usize)) {
-            return Err(Error::new(ErrorKind::InvalidData,
-                                  "File is too small for entries table!"));
+            return Err(Error::FileArcoV1(FileArcoV1Error::FileTooSmall));
         }
 
         let entries = unsafe {
@@ -127,8 +126,7 @@ impl FileArco {
             let test_checksum = checksum(&s);
 
             if test_checksum != header.entries_checksum {
-                return Err(Error::new(ErrorKind::InvalidData,
-                                      "Entries table has been corrupted!"));
+                return Err(Error::FileArcoV1(FileArcoV1Error::CorruptedEntriesTable));
             }
 
             deserialize(s).unwrap()
@@ -399,6 +397,67 @@ impl Drop for FileRef {
     }
 }
 
+#[derive(Debug)]
+pub enum FileArcoV1Error {
+    FileTooSmall,
+    NotArchive,
+    NotV1Archive,
+    CorruptedHeader,
+    CorruptedEntriesTable,
+}
+
+impl fmt::Display for FileArcoV1Error {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            FileArcoV1Error::FileTooSmall => {
+                write!(fmt, "File too small for FileArco v1 archive")
+            },
+            FileArcoV1Error::NotArchive => {
+                write!(fmt, "Not FileArco archive")
+            },
+            FileArcoV1Error::NotV1Archive => {
+                write!(fmt, "Not FileArco v1 archive")
+            },
+            FileArcoV1Error::CorruptedHeader => {
+                write!(fmt, "Corrupted header")
+            },
+            FileArcoV1Error::CorruptedEntriesTable => {
+                write!(fmt, "Corrupted entries table")
+            },
+        }
+    }
+}
+
+impl error::Error for FileArcoV1Error {
+    fn description(&self) -> &str {
+        static FILE_TOO_SMALL: &'static str = "File too small for FileArco v1 archive";
+        static NOT_ARCHIVE: &'static str = "Not FileArco archive";
+        static NOT_V1_ARCHIVE: &'static str = "Not FileArco v1 archive";
+        static CORRUPTED_HEADER: &'static str = "Corrupted header";
+        static CORRUPTED_ENTRIES_TABLE: &'static str = "Corrupted entries table";
+
+        match *self {
+            FileArcoV1Error::FileTooSmall => {
+                FILE_TOO_SMALL
+            },
+            FileArcoV1Error::NotArchive => {
+                NOT_ARCHIVE
+            },
+            FileArcoV1Error::NotV1Archive => {
+                NOT_V1_ARCHIVE
+            },
+            FileArcoV1Error::CorruptedHeader => {
+                CORRUPTED_HEADER
+            },
+            FileArcoV1Error::CorruptedEntriesTable => {
+                CORRUPTED_ENTRIES_TABLE
+            },
+        }
+    }
+
+    fn cause(&self) -> Option<&error::Error> { None }
+}
+
 struct Inner {
     file_offset: u64,
     entries: Entries,
@@ -447,6 +506,7 @@ struct Entries {
 }
 
 impl Entries {
+    // TODO: Remove Result wrapper since this should not fail
     fn new(file_data: FileData) -> Result<Self> {
         let mut files = HashMap::new();
         
@@ -508,11 +568,6 @@ mod tests {
     use super::*;
 
     fn get_file_data_stub(base_path: &Path) -> Result<FileData> {
-        if base_path != Path::new("testarchives/simple") {
-            return Err(Error::new(ErrorKind::Other,
-                                  "Invalid base_path for test!"));
-        }
-        
         let mut data = Vec::<FileDatum>::new();
         data.push(FileDatum::new(
             String::from("Cargo.toml"),
