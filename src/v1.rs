@@ -471,6 +471,7 @@ struct Inner {
     map: Mmap,
 }
 
+#[repr(C)]
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 struct Header {
     page_size: u64,
