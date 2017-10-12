@@ -1,3 +1,17 @@
+//! This module contains a function `get()` to retrieve a list of all ordinary
+//! files in a given directory hierarchy.
+//!
+//! # Example
+//!
+//! ```rust
+//! extern crate filearco;
+//!
+//! use std::path::Path;
+//!
+//! let path = Path::new("testarchives/simple");
+//! let file_data = filearco::get_file_data(&path).unwrap();
+//! ```
+
 use std::error;
 use std::fmt;
 use std::fs::File;
@@ -8,44 +22,6 @@ use crc::crc64::checksum_iso as checksum;
 use walkdir::WalkDir;
     
 use super::{Error, Result};
-
-#[derive(Debug)]
-pub enum FileDataError {
-    BasePathNotDirectory,
-    NonUtf8Filepath(String),
-}
-
-impl fmt::Display for FileDataError {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            FileDataError::BasePathNotDirectory => {
-                write!(fmt, "Base path is not a directory")
-            },
-            FileDataError::NonUtf8Filepath(ref file_path) => {
-                write!(fmt, "Non-Utf8 file path detected: {}", file_path)
-            },
-        }
-    }
-}
-
-impl error::Error for FileDataError {
-    fn description(&self) -> &str {
-        static BASE_PATH_NOT_DIRECTORY: &'static str = "Base path is not a directory";
-        static NON_UTF8_FILE_PATH: &'static str = "Non-Utf8 file path detected";
-
-        match *self {
-            FileDataError::BasePathNotDirectory => {
-                BASE_PATH_NOT_DIRECTORY
-            },
-            FileDataError::NonUtf8Filepath(_) => {
-                NON_UTF8_FILE_PATH
-            },
-        }
-    }
-
-    fn cause(&self) -> Option<&error::Error> { None }
-}
-
 
 /// This function retrieves basic information (i.e. path, length and checksum)
 /// of all files under a specific `base_path`.
@@ -77,58 +53,33 @@ pub fn get(base_path: &Path) -> Result<FileData> {
 
     for entry in WalkDir::new(&full_base_path) {
         let ent = entry?;
-        // match entry {
-        //     Ok(ent) => {
-                if ent.file_type().is_file() {
-                    let full_path = ent.path().to_path_buf();
-                    let file_path = full_path.strip_prefix(&full_base_path)
-                        .unwrap().to_path_buf();
-                    let length = ent.metadata().ok().unwrap().len();
 
-                    // We only support valid UTF-8 file paths.
-                    if let Some(p) = file_path.to_str() {
-                        // Compute checksum of file contents. 
-                        let mut in_file = File::open(full_path)?;
-                        let mut contents = Vec::<u8>::with_capacity(length as usize); 
-                        in_file.read_to_end(&mut contents)?;
-                        let contents_checksum = checksum(&contents); 
+        if ent.file_type().is_file() {
+            let full_path = ent.path().to_path_buf();
+            let file_path = full_path.strip_prefix(&full_base_path)
+                .unwrap().to_path_buf();
+            let length = ent.metadata().ok().unwrap().len();
 
-                        file_data.push(FileDatum {
-                            name: String::from(p),
-                            length: length,
-                            checksum: contents_checksum,
-                        });
-                    }
-                    else {
-                        return Err(Error::FileData(FileDataError::NonUtf8Filepath(
-                            String::from(file_path.to_string_lossy())
-                        )));
-                    }
-                }
-            // },
-        //     Err(err) => {
-        //         if let Some(cycle_error_path) = err.loop_ancestor() {
-        //             return Err(Error::new(ErrorKind::Other,
-        //                                   format!(
-        //                                       "Cycle detected for {}",
-        //                                       cycle_error_path.to_string_lossy()
-        //                                   )));
-        //         }
-        //         if let Some(general_error_path) = err.path() {
-        //             return Err(Error::new(ErrorKind::Other,
-        //                                   format!(
-        //                                       "Error reading {}",
-        //                                       general_error_path.to_string_lossy()
-        //                                   )));
-        //         }
+            // We only support valid UTF-8 file paths.
+            if let Some(p) = file_path.to_str() {
+                // Compute checksum of file contents. 
+                let mut in_file = File::open(full_path)?;
+                let mut contents = Vec::<u8>::with_capacity(length as usize); 
+                in_file.read_to_end(&mut contents)?;
+                let contents_checksum = checksum(&contents); 
 
-        //         return Err(Error::new(ErrorKind::Other,
-        //                               format!(
-        //                                   "Walk directory failed at depth {}",
-        //                                   err.depth()
-        //                               )));
-        //     }
-        // } 
+                file_data.push(FileDatum {
+                    name: String::from(p),
+                    length: length,
+                    checksum: contents_checksum,
+                });
+            }
+            else {
+                return Err(Error::FileData(FileDataError::NonUtf8Filepath(
+                    String::from(file_path.to_string_lossy())
+                )));
+            }
+        }
     }
 
     Ok(FileData {
@@ -166,6 +117,46 @@ impl FileData {
     pub fn into_vec(self) -> Vec<FileDatum> {
         self.data
     }
+}
+
+/// Errors retrieving information on files
+#[derive(Debug)]
+pub enum FileDataError {
+    /// Input path is not a directory
+    BasePathNotDirectory,
+    /// Non UTF-8 filename detected
+    NonUtf8Filepath(String),
+}
+
+impl fmt::Display for FileDataError {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            FileDataError::BasePathNotDirectory => {
+                write!(fmt, "Base path is not a directory")
+            },
+            FileDataError::NonUtf8Filepath(ref file_path) => {
+                write!(fmt, "{}", file_path)
+            },
+        }
+    }
+}
+
+impl error::Error for FileDataError {
+    fn description(&self) -> &str {
+        static BASE_PATH_NOT_DIRECTORY: &'static str = "Base path is not a directory";
+        static NON_UTF8_FILE_PATH: &'static str = "Non-Utf8 file path detected";
+
+        match *self {
+            FileDataError::BasePathNotDirectory => {
+                BASE_PATH_NOT_DIRECTORY
+            },
+            FileDataError::NonUtf8Filepath(_) => {
+                NON_UTF8_FILE_PATH
+            },
+        }
+    }
+
+    fn cause(&self) -> Option<&error::Error> { None }
 }
 
 /// This struct contains basic information about a file.

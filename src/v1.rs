@@ -397,12 +397,18 @@ impl Drop for FileRef {
     }
 }
 
+/// Error container for handling FileArco v1 archives
 #[derive(Debug)]
 pub enum FileArcoV1Error {
+    /// File is too small for the header and/or entries table of a FileArco v1 archive
     FileTooSmall,
+    /// File does not have a valid identifier
     NotArchive,
+    /// File has a valid identifier but an incorrect version number
     NotV1Archive,
+    /// Header's computed checksum did not match the one stored in the file
     CorruptedHeader,
+    /// Entry table's computed checksum did not match the one stored in the file
     CorruptedEntriesTable,
 }
 
