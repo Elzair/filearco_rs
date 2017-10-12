@@ -9,9 +9,10 @@
 //! use std::path::Path;
 //!
 //! let path = Path::new("testarchives/simple");
-//! let file_data = filearco::get_file_data(&path).unwrap();
+//! let file_data = filearco::get_file_data(path).unwrap();
 //! ```
 
+use std::convert::AsRef;
 use std::error;
 use std::fmt;
 use std::fs::File;
@@ -40,14 +41,14 @@ use super::{Error, Result};
 /// use std::path::Path;
 ///
 /// let path = Path::new("testarchives/simple");
-/// let file_data = filearco::get_file_data(&path).unwrap();
+/// let file_data = filearco::get_file_data(path).unwrap();
 /// ```
-pub fn get(base_path: &Path) -> Result<FileData> {
-    if !base_path.is_dir() {
+pub fn get<P: AsRef<Path>>(base_path: P) -> Result<FileData> {
+    if !base_path.as_ref().is_dir() {
         return Err(Error::FileData(FileDataError::BasePathNotDirectory));
     }
     
-    let full_base_path = base_path.canonicalize()?;
+    let full_base_path = base_path.as_ref().canonicalize()?;
 
     let mut file_data = Vec::<FileDatum>::new();
 
@@ -250,7 +251,7 @@ mod tests {
 
         let path = Path::new("testarchives/reqchandocs");
         
-        let file_data = get(&path).ok().unwrap();
+        let file_data = get(path).ok().unwrap();
 
         let full_path = path.canonicalize().ok().unwrap();
         

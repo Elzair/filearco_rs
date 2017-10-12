@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::convert::AsRef;
 use std::error;
 use std::fmt;
 use std::fs::{File, create_dir_all};
@@ -40,13 +41,13 @@ impl FileArco {
     /// use std::path::Path;
     ///
     /// let path = Path::new("testarchives/simple_v1.fac");
-    /// let file_data = filearco::v1::FileArco::new(&path).unwrap(); 
+    /// let file_data = filearco::v1::FileArco::new(path).unwrap(); 
     /// ```
-    pub fn new(path: &Path) -> Result<Self> {
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
         const U64S: usize = 8; // constant of mem::size_of::<u64>()
         const NUM_TOP_FIELDS: u64 = 4;
 
-        let map = Mmap::open_path(path, Protection::Read)?;
+        let map = Mmap::open_path(path.as_ref(), Protection::Read)?;
 
         if map.len() < (NUM_TOP_FIELDS as usize) * U64S {
 
@@ -156,12 +157,12 @@ impl FileArco {
     /// use std::path::Path;
     ///
     /// let path = Path::new("testarchives/simple_v1.fac");
-    /// let file_data = filearco::v1::FileArco::new(&path).unwrap(); 
+    /// let file_data = filearco::v1::FileArco::new(path).unwrap(); 
     /// 
     /// let cargo_toml = file_data.get("Cargo.toml").unwrap();
     /// ```
-    pub fn get(&self, file_path: &str) -> Option<FileRef> {
-        if let Some(entry) = self.inner.entries.files.get(file_path) {
+    pub fn get<P: AsRef<str>>(&self, file_path: P) -> Option<FileRef> {
+        if let Some(entry) = self.inner.entries.files.get(file_path.as_ref()) {
             let offset = (self.inner.file_offset + entry.offset) as isize;
             let address = unsafe { self.inner.map.ptr().offset(offset) };
 
@@ -188,13 +189,13 @@ impl FileArco {
         }
     }
     
-    pub fn make(file_data: FileData, out_path: &Path) -> Result<()> {
+    pub fn make<P: AsRef<Path>>(file_data: FileData, out_path: P) -> Result<()> {
         const U64S: usize = 8; // constant of mem::size_of::<u64>()
         const NUM_TOP_FIELDS: u64 = 4;
 
         // Create output directories if they do not already exist.
         #[allow(unused_variables)]
-        let res = match out_path.parent() {
+        let res = match out_path.as_ref().parent() {
             Some(parent) => create_dir_all(&parent),
             None => Ok(()),
         }?;
@@ -301,7 +302,7 @@ impl FileRef {
     /// use std::path::Path;
     ///
     /// let path = Path::new("testarchives/simple_v1.fac");
-    /// let file_data = filearco::v1::FileArco::new(&path).unwrap(); 
+    /// let file_data = filearco::v1::FileArco::new(path).unwrap(); 
     /// 
     /// let cargo_toml = file_data.get("Cargo.toml").unwrap();
     /// assert!(cargo_toml.is_valid());
@@ -325,7 +326,7 @@ impl FileRef {
     /// use std::path::Path;
     ///
     /// let path = Path::new("testarchives/simple_v1.fac");
-    /// let file_data = filearco::v1::FileArco::new(&path).unwrap(); 
+    /// let file_data = filearco::v1::FileArco::new(path).unwrap(); 
     /// 
     /// let cargo_toml = file_data.get("Cargo.toml").unwrap();
     /// let cargo_toml_slice = cargo_toml.as_slice();
@@ -377,7 +378,7 @@ impl FileRef {
     /// use std::path::Path;
     ///
     /// let path = Path::new("testarchives/simple_v1.fac");
-    /// let file_data = filearco::v1::FileArco::new(&path).unwrap(); 
+    /// let file_data = filearco::v1::FileArco::new(path).unwrap(); 
     /// 
     /// let cargo_toml = file_data.get("Cargo.toml").unwrap();
     /// println!("File length: {}", cargo_toml.len());
@@ -574,7 +575,7 @@ mod tests {
     use super::super::file_data::FileDatum;
     use super::*;
 
-    fn get_file_data_stub(base_path: &Path) -> Result<FileData> {
+    fn get_file_data_stub<P: AsRef<Path>>(base_path: P) -> Result<FileData> {
         let mut data = Vec::<FileDatum>::new();
         data.push(FileDatum::new(
             String::from("Cargo.toml"),
@@ -593,7 +594,7 @@ mod tests {
         ));
         
         Ok(FileData::new(
-            base_path.to_path_buf(),
+            base_path.as_ref().to_path_buf(),
             data,
         ))
     }
@@ -633,13 +634,13 @@ mod tests {
         let archive_path = Path::new("tmptest/tmparch.fac");
 
         // Remove test archive file from previous run of unit tests, if it exists.
-        match remove_file(&archive_path) {
+        match remove_file(archive_path) {
             _ => {},
         }
 
-        let file_data = get_file_data_stub(&Path::new("testarchives/simple")).ok().unwrap();
+        let file_data = get_file_data_stub(Path::new("testarchives/simple")).ok().unwrap();
 
-        FileArco::make(file_data, &archive_path).unwrap();
+        FileArco::make(file_data, archive_path).unwrap();
     }
 
     #[test]
@@ -647,7 +648,7 @@ mod tests {
         let archive_path = Path::new("testarchives/simple_v1.fac");
         let simple = get_simple();
 
-        match FileArco::new(&archive_path) {
+        match FileArco::new(archive_path) {
             Ok(archive) => {
                 for name in simple.iter() {
                     assert!(archive.inner.entries.files.contains_key(name));
@@ -662,13 +663,13 @@ mod tests {
     #[test]
     fn test_v1_filearco_get() {
         let archive_path = Path::new("testarchives/simple_v1.fac");
-        let archive = FileArco::new(&archive_path).ok().unwrap();
+        let archive = FileArco::new(archive_path).ok().unwrap();
 
         let simple = get_file_data_stub(Path::new("testarchives/simple")).ok().unwrap();
         let svec = simple.into_vec();
 
         for entry in svec.iter() {
-            if let Some(fileref) = archive.get(entry.name().as_ref()) {
+            if let Some(fileref) = archive.get(entry.name()) {
                 assert_eq!(fileref.len(), entry.len());
                 assert!(fileref.is_valid());
             }
@@ -682,9 +683,9 @@ mod tests {
     fn test_v1_fileentry_as_slice() {
         let dir_path = Path::new("testarchives/simple");
         let archive_path = Path::new("testarchives/simple_v1.fac");
-        let archive = FileArco::new(&archive_path).ok().unwrap();
+        let archive = FileArco::new(archive_path).ok().unwrap();
 
-        let simple = get_file_data_stub(&dir_path).ok().unwrap();
+        let simple = get_file_data_stub(dir_path).ok().unwrap();
         let base_path = simple.path();
         let svec = simple.into_vec();
 

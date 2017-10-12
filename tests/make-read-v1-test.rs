@@ -22,7 +22,7 @@ fn test_make_read_v1() {
     let datums = file_data_copy.into_vec();
 
     for datum in datums.into_iter() {
-        let fileref = archive.get(datum.name().as_ref()).unwrap();
+        let fileref = archive.get(datum.name()).unwrap();
 
         assert_eq!(datum.len(), fileref.len());
         assert!(fileref.is_valid());
