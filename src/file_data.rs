@@ -197,6 +197,55 @@ impl FileDatum {
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
+    fn get_reqchan_docs() -> Vec<String> {
+        let mut v = Vec::<String>::new();
+
+        v.push(String::from("implementors\\core\\clone\\trait.Clone.js"));
+        v.push(String::from("implementors\\core\\fmt\\trait.Debug.js"));
+        v.push(String::from("implementors\\core\\ops\\trait.Drop.js"));
+        v.push(String::from("reqchan\\RequestContract.t.html"));
+        v.push(String::from("reqchan\\Requester.t.html"));
+        v.push(String::from("reqchan\\Responder.t.html"));
+        v.push(String::from("reqchan\\ResponseContract.t.html"));
+        v.push(String::from("reqchan\\TryReceiveError.t.html"));
+        v.push(String::from("reqchan\\TryRequestError.t.html"));
+        v.push(String::from("reqchan\\TryRespondError.t.html"));
+        v.push(String::from("reqchan\\channel.v.html"));
+        v.push(String::from("reqchan\\enum.TryReceiveError.html"));
+        v.push(String::from("reqchan\\enum.TryRequestError.html"));
+        v.push(String::from("reqchan\\enum.TryRespondError.html"));
+        v.push(String::from("reqchan\\fn.channel.html"));
+        v.push(String::from("reqchan\\index.html"));
+        v.push(String::from("reqchan\\sidebar-items.js"));
+        v.push(String::from("reqchan\\struct.RequestContract.html"));
+        v.push(String::from("reqchan\\struct.Requester.html"));
+        v.push(String::from("reqchan\\struct.Responder.html"));
+        v.push(String::from("reqchan\\struct.ResponseContract.html"));
+        v.push(String::from("src\\reqchan\\lib.rs.html"));
+        v.push(String::from("COPYRIGHT.txt"));
+        v.push(String::from("FiraSans-LICENSE.txt"));
+        v.push(String::from("FiraSans-Medium.woff"));
+        v.push(String::from("FiraSans-Regular.woff"));
+        v.push(String::from("Heuristica-Italic.woff"));
+        v.push(String::from("Heuristica-LICENSE.txt"));
+        v.push(String::from("LICENSE-APACHE.txt"));
+        v.push(String::from("LICENSE-MIT.txt"));
+        v.push(String::from("SourceCodePro-LICENSE.txt"));
+        v.push(String::from("SourceCodePro-Regular.woff"));
+        v.push(String::from("SourceCodePro-Semibold.woff"));
+        v.push(String::from("SourceSerifPro-Bold.woff"));
+        v.push(String::from("SourceSerifPro-LICENSE.txt"));
+        v.push(String::from("SourceSerifPro-Regular.woff"));
+        v.push(String::from("main.css"));
+        v.push(String::from("main.js"));
+        v.push(String::from("normalize.css"));
+        v.push(String::from("rustdoc.css"));
+        v.push(String::from("search-index.js"));
+
+        v
+    }
+    #[cfg(not(windows))]
     fn get_reqchan_docs() -> Vec<String> {
         let mut v = Vec::<String>::new();
 
@@ -252,9 +301,6 @@ mod tests {
         // For some reason, Appveyor builds do not like the big archive.
         // Since all the other unit tests seem to work, and even this one
         // works on other systems, I just use the simpler directory.
-        #[cfg(windows)]
-        let path = Path::new("testarchives/simple");
-        #[cfg(not(windows))]
         let path = Path::new("testarchives/reqchandocs");
         
         let file_data = get(path).ok().unwrap();

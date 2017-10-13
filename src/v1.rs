@@ -1,3 +1,25 @@
+//! This module creates and manages a FileArco v1 archive file.
+//!
+//! # Example
+//!
+//! This example opens an example archive and outputs the text of all 3
+//! stored files.
+//!
+//! ```rust
+//! extern crate filearco;
+//!
+//! use std::path::Path;
+//!
+//! let archive_path = Path::new("testarchives/simple_v1.fac");
+//! let archive = filearco::v1::FileArco::new(archive_path).ok().unwrap();
+//! let cargo_toml = archive.get("Cargo.toml").unwrap();
+//! println!("{}", cargo_toml.as_str());
+//! let license_mit = archive.get("LICENSE-MIT").unwrap();
+//! println!("{}", license_mit.as_str());
+//! let license_apache = archive.get("LICENSE-APACHE").unwrap();
+//! println!("{}", license_apache.as_str());
+//! ```
+
 use std::collections::HashMap;
 use std::convert::AsRef;
 use std::error;
@@ -40,7 +62,7 @@ impl FileArco {
     /// use std::path::Path;
     ///
     /// let path = Path::new("testarchives/simple_v1.fac");
-    /// let file_data = filearco::v1::FileArco::new(path).unwrap(); 
+    /// let file_data = filearco::v1::FileArco::new(path).ok().unwrap(); 
     /// ```
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
         const U64S: usize = 8; // constant of mem::size_of::<u64>()
@@ -175,6 +197,27 @@ impl FileArco {
         }
     }
     
+    /// This method creates a FileArco v1 archive file at the specified file
+    /// path and populates it with the specified files.
+    ///
+    /// # Arguments
+    ///
+    /// * file_data - file paths and other metadata of the input files
+    ///
+    /// * out_path - file path for archive file
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// extern crate filearco;
+    ///
+    /// use std::path::Path;
+    ///
+    /// let base_path = Path::new("testarchives/reqchandocs");
+    /// let archive_path = Path::new("tmptest/doctest_make_reqchandocs_v1.fac");
+    /// let file_data = filearco::get_file_data(base_path).ok().unwrap();
+    /// filearco::v1::FileArco::make(file_data, archive_path).ok().unwrap();
+    /// ```
     pub fn make<P: AsRef<Path>>(file_data: FileData, out_path: P) -> Result<()> {
         const U64S: usize = 8; // constant of mem::size_of::<u64>()
         const NUM_TOP_FIELDS: u64 = 4;
