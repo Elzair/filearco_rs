@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use std::convert::AsRef;
 use std::error;
 use std::fmt;
-use std::fs::{File, create_dir_all};
+use std::fs::File;
 use std::io::prelude::*;
 use std::mem;
 use std::slice;
@@ -197,8 +197,8 @@ impl FileArco {
         }
     }
     
-    /// This method creates a FileArco v1 archive file at the specified file
-    /// path and populates it with the specified files.
+    /// This method creates a FileArco v1 archive file, populates it with
+    /// the specified files, and writes the result to the standard output.
     ///
     /// # Arguments
     ///
@@ -211,23 +211,25 @@ impl FileArco {
     /// ```rust
     /// extern crate filearco;
     ///
+    /// use std::fs::File;
+    /// use std::io;
     /// use std::path::Path;
     ///
     /// let base_path = Path::new("testarchives/reqchandocs");
-    /// let archive_path = Path::new("tmptest/doctest_make_reqchandocs_v1.fac");
     /// let file_data = filearco::get_file_data(base_path).ok().unwrap();
-    /// filearco::v1::FileArco::make(file_data, archive_path).ok().unwrap();
+    ///
+    /// filearco::v1::FileArco::make(file_data, io::stdout()).ok().unwrap();
     /// ```
-    pub fn make<P: AsRef<Path>>(file_data: FileData, out_path: P) -> Result<()> {
+    pub fn make<H: Write>(file_data: FileData, mut out_file: H) -> Result<()> {
         const U64S: usize = 8; // constant of mem::size_of::<u64>()
         const NUM_TOP_FIELDS: u64 = 4;
 
-        // Create output directories if they do not already exist.
-        #[allow(unused_variables)]
-        let res = match out_path.as_ref().parent() {
-            Some(parent) => create_dir_all(&parent),
-            None => Ok(()),
-        }?;
+        // // Create output directories if they do not already exist.
+        // #[allow(unused_variables)]
+        // let res = match out_path.as_ref().parent() {
+        //     Some(parent) => create_dir_all(&parent),
+        //     None => Ok(()),
+        // }?;
 
         let base_path = file_data.path();
    
@@ -241,8 +243,8 @@ impl FileArco {
                                  checksum(&entries_encoded));
         let header_encoded = serialize(&header, Infinite).unwrap();
   
-        // Create output archive.
-        let mut out_file = File::create(out_path)?;
+        // // Create output archive.
+        // let mut out_file = File::create(out_path)?;
 
         // Write file identification number to archive.
         let magic_number = FILEARCO_MAGIC_NUMBER;
@@ -581,7 +583,7 @@ fn get_aligned_length(length: u64) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use std::fs::remove_file;
+    use std::fs::create_dir_all;
     
     use super::super::file_data::FileDatum;
     use super::*;
@@ -642,16 +644,18 @@ mod tests {
 
     #[test]
     fn test_v1_filearco_make() {
-        let archive_path = Path::new("tmptest/tmparch.fac");
+        let base_path = Path::new("testarchives/simple");
+        let file_data = get_file_data_stub(base_path).ok().unwrap();
 
-        // Remove test archive file from previous run of unit tests, if it exists.
-        match remove_file(archive_path) {
-            _ => {},
+        let archive_path = Path::new("tmptest/test_v1_filearco_make.fac");
+
+        // Create directory if it does not exist
+        if let Some(parent) = archive_path.parent() {
+            create_dir_all(parent).ok().unwrap();
         }
 
-        let file_data = get_file_data_stub(Path::new("testarchives/simple")).ok().unwrap();
-
-        FileArco::make(file_data, archive_path).unwrap();
+        let archive_file = File::create(archive_path).ok().unwrap();
+        FileArco::make(file_data, archive_file).ok().unwrap();
     }
 
     #[test]
@@ -676,7 +680,8 @@ mod tests {
         let archive_path = Path::new("testarchives/simple_v1.fac");
         let archive = FileArco::new(archive_path).ok().unwrap();
 
-        let simple = get_file_data_stub(Path::new("testarchives/simple")).ok().unwrap();
+        let base_path = Path::new("testarchives/simple");
+        let simple = get_file_data_stub(base_path).ok().unwrap();
         let svec = simple.into_vec();
 
         for entry in svec.iter() {

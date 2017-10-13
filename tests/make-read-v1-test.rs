@@ -1,6 +1,6 @@
 extern crate filearco;
 
-use std::fs::File;
+use std::fs::{File, create_dir_all};
 use std::io::prelude::*;
 use std::path::Path;
 
@@ -10,12 +10,20 @@ use filearco::v1::FileArco;
 #[test]
 fn test_make_read_v1() {
     let dir_path = Path::new("testarchives/reqchandocs");
-    let archive_path = Path::new("tmptest/make_read_v1_test.fac");
 
-    let file_data = get_file_data(&dir_path).ok().unwrap();
+    let file_data = get_file_data(dir_path).ok().unwrap();
     let file_data_copy = file_data.clone();
 
-    FileArco::make(file_data, &archive_path).ok().unwrap();
+    let archive_path = Path::new("tmptest/make_read_v1_test.fac");
+    {
+        // Create directory if it does not exist
+        if let Some(parent) = archive_path.parent() {
+            create_dir_all(parent).ok().unwrap();
+        }
+
+        let archive_file = File::create(archive_path).ok().unwrap();
+        FileArco::make(file_data, archive_file).ok().unwrap();
+    }
 
     let archive = FileArco::new(&archive_path).ok().unwrap();
 

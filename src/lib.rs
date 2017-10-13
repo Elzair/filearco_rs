@@ -9,13 +9,23 @@
 //! ```rust
 //! extern crate filearco;
 //!
+//! use std::fs::File;
 //! use std::path::Path;
 //!
+//! // Retrieve metadata on files to archive.
 //! let base_path = Path::new("testarchives/simple");
-//! let archive_path = Path::new("tmptest/doctest_simple_v1.fac");
 //! let file_data = filearco::get_file_data(base_path).ok().unwrap();
-//! filearco::v1::FileArco::make(file_data, archive_path).ok().unwrap();
+//!
+//! // Create FileArco v1 archive file.
+//! // Make sure parent directory exists first.
+//! let archive_path = Path::new("tmptest/doctest_simple_v1.fac");
+//! let archive_file = File::create(archive_path).ok().unwrap();
+//! filearco::v1::FileArco::make(file_data, archive_file).ok().unwrap();
+//!
+//! // Map archive file into memory.
 //! let archive = filearco::v1::FileArco::new(archive_path).ok().unwrap();
+//!
+//! // Retrieve and print contents of archive.
 //! let cargo_toml = archive.get("Cargo.toml").unwrap();
 //! println!("{}", cargo_toml.as_str());
 //! let license_mit = archive.get("LICENSE-MIT").unwrap();
