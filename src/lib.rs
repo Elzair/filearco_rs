@@ -27,11 +27,11 @@
 //!
 //! // Retrieve and print contents of archive.
 //! let cargo_toml = archive.get("Cargo.toml").unwrap();
-//! println!("{}", cargo_toml.as_str());
+//! println!("{}", cargo_toml.as_str().ok().unwrap());
 //! let license_mit = archive.get("LICENSE-MIT").unwrap();
-//! println!("{}", license_mit.as_str());
+//! println!("{}", license_mit.as_str().ok().unwrap());
 //! let license_apache = archive.get("LICENSE-APACHE").unwrap();
-//! println!("{}", license_apache.as_str());
+//! println!("{}", license_apache.as_str().ok().unwrap());
 //! ```
 
 extern crate bincode;

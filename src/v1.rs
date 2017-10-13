@@ -13,11 +13,11 @@
 //! let archive_path = Path::new("testarchives/simple_v1.fac");
 //! let archive = filearco::v1::FileArco::new(archive_path).ok().unwrap();
 //! let cargo_toml = archive.get("Cargo.toml").unwrap();
-//! println!("{}", cargo_toml.as_str());
+//! println!("{}", cargo_toml.as_str().ok().unwrap());
 //! let license_mit = archive.get("LICENSE-MIT").unwrap();
-//! println!("{}", license_mit.as_str());
+//! println!("{}", license_mit.as_str().ok().unwrap());
 //! let license_apache = archive.get("LICENSE-APACHE").unwrap();
-//! println!("{}", license_apache.as_str());
+//! println!("{}", license_apache.as_str().ok().unwrap());
 //! ```
 
 use std::collections::HashMap;
@@ -28,6 +28,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::mem;
 use std::slice;
+use std::str;
 use std::sync::Arc;
 use std::path::Path;
 
@@ -386,13 +387,14 @@ impl FileRef {
     /// let file_data = filearco::v1::FileArco::new(&path).unwrap(); 
     /// 
     /// let license = file_data.get("LICENSE-APACHE").unwrap();
-    /// let license_text = license.as_str();
+    /// let license_text = license.as_str().ok().unwrap();
     /// println!("{}", license_text);
     /// ```
-    pub fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> Result<&str> {
         unsafe {
             let sl = slice::from_raw_parts(self.address, self.length as usize);
-            mem::transmute::<&[u8], &str>(sl)
+            let s = str::from_utf8(sl)?;
+            Ok(s)
         }
     }
 
