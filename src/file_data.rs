@@ -107,14 +107,17 @@ impl FileData {
         }
     }
 
+    /// This method returns the path of the indexed directory.
     pub fn path(&self) -> PathBuf {
         self.base_path.clone()
     }
     
+    /// This method returns the number of files indexed.
     pub fn len(&self) -> usize {
         self.data.len()
     }
 
+    /// This method consumes this struct and returns a Vec of its contents.
     pub fn into_vec(self) -> Vec<FileDatum> {
         self.data
     }

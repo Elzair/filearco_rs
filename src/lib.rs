@@ -50,6 +50,8 @@ pub mod v1;
 
 pub use file_data::{get as get_file_data, FileData, FileDataError};
 
+use std::error;
+use std::fmt;
 use std::io;
 use std::result;
 use std::str;
@@ -62,6 +64,40 @@ pub enum Error {
     Walkdir(walkdir::Error),
     FileArcoV1(v1::FileArcoV1Error),
     FileData(FileDataError),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &Error::Io(ref err) => err.fmt(fmt),
+            &Error::Utf8(ref err) => err.fmt(fmt),
+            &Error::Walkdir(ref err) => err.fmt(fmt),
+            &Error::FileArcoV1(ref err) => err.fmt(fmt),
+            &Error::FileData(ref err) => err.fmt(fmt),
+        }
+    }
+}
+
+impl error::Error for Error {
+    fn description(&self) -> &str {
+        match self {
+            &Error::Io(ref err) => err.description(),
+            &Error::Utf8(ref err) => err.description(),
+            &Error::Walkdir(ref err) => err.description(),
+            &Error::FileArcoV1(ref err) => err.description(),
+            &Error::FileData(ref err) => err.description(),
+        }
+    }
+
+    fn cause(&self) -> Option<&error::Error> {
+        match self {
+            &Error::Io(ref err) => err.cause(),
+            &Error::Utf8(ref err) => err.cause(),
+            &Error::Walkdir(ref err) => err.cause(),
+            &Error::FileArcoV1(ref err) => err.cause(),
+            &Error::FileData(ref err) => err.cause(),
+        }
+    }
 }
 
 impl From<io::Error> for Error {
