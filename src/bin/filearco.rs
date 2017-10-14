@@ -14,16 +14,23 @@ fn main() {
                             (author: "Philip Woods <elzairthesorcerer@gmail.com>")
                             (about: "Archives FileArco files")
                             (@arg DIRPATH: +required "Path to directory to archive")
-                            (@arg FILEPATH: -p --file-path +takes_value "Write to FILEPATH instead of stdout")).get_matches();
+                            (@arg ARCHIVEVERSION: -v --archive_version +takes_value "Specify version of FileArco format to create")
+                            (@arg FILEPATH: -p --path +takes_value "Write to FILEPATH instead of stdout")).get_matches();
     
     let dirpath = matches.value_of("DIRPATH").unwrap();
+    let archive_version = matches.value_of("ARCHIVEVERSION").unwrap_or("1");
+
+    if archive_version != "1" {
+        println!("Invalid FileArco version: {}", archive_version);
+        exit(-1);
+    }
 
     let file_data = match filearco::get_file_data(dirpath) {
         Ok(data) => data,
         Err(err) => {
             // panic!(err.to_string())
             println!("{}", err.description());
-            exit(-1);
+            exit(-2);
         }
     };
 
@@ -33,7 +40,7 @@ fn main() {
                 Ok(handle) => Box::new(handle) as Box<io::Write>,
                 Err(err) => {
                     println!("{}", err.description());
-                    exit(-2);
+                    exit(-3);
                 },
             }
         },
@@ -48,7 +55,7 @@ fn main() {
         },
         Err(err) => {
             println!("{}", err.description());
-            exit(-1);
+            exit(-4);
         }
     }
 }
