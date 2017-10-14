@@ -355,7 +355,6 @@ impl FileRef {
     /// ```
     pub fn is_valid(&self) -> bool {
         let sl = self.as_slice();
-
         let checksum_computed = checksum(sl);
 
         self.checksum == checksum_computed
@@ -394,7 +393,6 @@ impl FileRef {
     /// ```rust
     /// extern crate filearco;
     ///
-    /// use std::mem;
     /// use std::path::Path;
     ///
     /// let path = Path::new("testarchives/simple_v1.fac");
@@ -408,9 +406,41 @@ impl FileRef {
         let sl = unsafe {
             slice::from_raw_parts(self.address, self.length as usize)
         };
+
         let s = str::from_utf8(sl)?;
 
         Ok(s)
+    }
+
+    /// This method returns a tuple with a raw pointer to the beginning
+    /// of the file and the page-aligned length of the file.
+    ///
+    /// # Unsafety
+    ///
+    /// Callers should not use this method to modify the contents
+    /// of the file. Undefined Behavior will result.
+    ///
+    /// # Example
+    ///
+    /// This example uses the `memadvise` crate to advise the operating system
+    /// to load the entire file into physical RAM.
+    ///
+    /// ```rust
+    /// extern crate filearco;
+    /// extern crate memadvise;
+    ///
+    /// use std::path::Path;
+    ///
+    /// let path = Path::new("testarchives/simple_v1.fac");
+    /// let file_data = filearco::v1::FileArco::new(&path).unwrap(); 
+    /// 
+    /// let license = file_data.get("LICENSE-APACHE").unwrap();
+    /// let (ptr, len) = license.as_raw();
+    /// 
+    /// memadvise::advise(ptr, len, memadvise::Advice::WillNeed).ok().unwrap();
+    /// ```
+    pub fn as_raw(&self) -> (*mut (), usize) {
+        (self.address as *mut (), self.aligned_length as usize)
     }
 
     /// This method retrieves the length of the file.
@@ -607,6 +637,8 @@ fn get_aligned_length(length: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use std::fs::create_dir_all;
+
+    use memadvise::{advise, Advice};
     
     use super::super::file_data::FileDatum;
     use super::*;
@@ -725,7 +757,7 @@ mod tests {
     }
 
     #[test]
-    fn test_v1_fileentry_as_slice() {
+    fn test_v1_fileref_as_slice() {
         let dir_path = Path::new("testarchives/simple");
         let archive_path = Path::new("testarchives/simple_v1.fac");
         let archive = FileArco::new(archive_path).ok().unwrap();
@@ -753,6 +785,24 @@ mod tests {
             assert_eq!(entry.len(), archived_file.as_slice().len() as u64);
             assert_eq!(length2, archived_file.as_slice().len() as u64);
             assert_eq!(contents, archived_file.as_slice());
+        }
+    }
+    
+    #[test]
+    fn test_v1_fileref_as_raw() {
+        let dir_path = Path::new("testarchives/simple");
+        let archive_path = Path::new("testarchives/simple_v1.fac");
+        let archive = FileArco::new(archive_path).ok().unwrap();
+
+        let simple = get_file_data_stub(dir_path).ok().unwrap();
+        let svec = simple.into_vec();
+
+        for entry in svec.into_iter() {
+            let archived_file = archive.get(&entry.name()).unwrap();
+
+            let (ptr, len) = archived_file.as_raw();
+            advise(ptr, len, Advice::WillNeed).ok().unwrap();
+            advise(ptr, len, Advice::DontNeed).ok().unwrap();
         }
     }
 }
