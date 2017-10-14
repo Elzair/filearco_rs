@@ -156,6 +156,7 @@ impl FileArco {
         Ok(FileArco {
             inner: Arc::new(Inner {
                 file_offset: header.file_offset,
+                page_size: header.page_size,
                 entries: entries,
                 map: map,
             })
@@ -176,7 +177,7 @@ impl FileArco {
     /// use std::path::Path;
     ///
     /// let path = Path::new("testarchives/simple_v1.fac");
-    /// let file_data = filearco::v1::FileArco::new(path).unwrap(); 
+    /// let file_data = filearco::v1::FileArco::new(path).ok().unwrap(); 
     /// 
     /// let cargo_toml = file_data.get("Cargo.toml").unwrap();
     /// ```
@@ -196,6 +197,24 @@ impl FileArco {
         else {
             None
         }
+    }
+
+    /// This method returns the memory page size of the system used to create
+    /// the archive file.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// extern crate filearco;
+    ///
+    /// use std::path::Path;
+    ///
+    /// let path = Path::new("testarchives/simple_v1.fac");
+    /// let file_data = filearco::v1::FileArco::new(path).ok().unwrap(); 
+    /// println!("{}", file_data.page_size());
+    /// ```
+    pub fn page_size(&self) -> u64 {
+        self.inner.page_size
     }
     
     /// This method creates a FileArco v1 archive file, populates it with
@@ -240,6 +259,7 @@ impl FileArco {
 
         // Create header and serialize it.
         let header = Header::new(NUM_TOP_FIELDS * (U64S as u64),
+                                 get_page_size() as u64,
                                  entries_encoded.len() as u64,
                                  checksum(&entries_encoded));
         let header_encoded = serialize(&header, Infinite).unwrap();
@@ -309,6 +329,8 @@ impl FileArco {
     }
 }
 
+/// This struct represents a reference to a slice of memory containing
+/// a requested file from the archive.
 #[allow(dead_code)]
 pub struct FileRef {
     address: *const u8,
@@ -488,6 +510,7 @@ impl error::Error for FileArcoV1Error {
 
 struct Inner {
     file_offset: u64,
+    page_size: u64,
     entries: Entries,
     map: Mmap,
 }
@@ -496,17 +519,20 @@ struct Inner {
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 struct Header {
     file_offset: u64,
+    page_size: u64,
     entries_length: u64,
     entries_checksum: u64,
 }
 
 impl Header {
     fn new(current_offset: u64,
+           page_size: u64,
            entries_length: u64,
            entries_checksum: u64) -> Self {
         // Serialize test struct to determine `file_offset`.
         let test_header = Header {
             file_offset: 0,
+            page_size: page_size,
             entries_length: entries_length,
             entries_checksum: entries_checksum,
         };
@@ -518,6 +544,7 @@ impl Header {
 
         Header {
             file_offset: file_offset,
+            page_size: page_size,
             entries_length: entries_length,
             entries_checksum: entries_checksum,
         }
@@ -671,10 +698,16 @@ mod tests {
                     assert!(archive.inner.entries.files.contains_key(name));
                 }
             },
-            Err(err) => {
-                println!("{:?}", err);
-                assert!(false); },
+            Err(_) => { assert!(false); },
         }
+    }
+
+    #[test]
+    fn test_v1_filearco_page_size() {
+        let archive_path = Path::new("testarchives/simple_v1.fac");
+        let archive = FileArco::new(archive_path).ok().unwrap();
+
+        assert_eq!(archive.page_size(), 4096);
     }
 
     #[test]
