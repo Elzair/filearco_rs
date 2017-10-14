@@ -32,7 +32,7 @@ use std::str;
 use std::sync::Arc;
 use std::path::Path;
 
-use bincode::{serialize, deserialize, Infinite};
+use bincode::{serialize, deserialize, Bounded, Infinite};
 use crc::crc64::checksum_iso as checksum;
 use memmap::{Mmap, Protection};
 use page_size::get as get_page_size;
@@ -81,7 +81,7 @@ impl FileArco {
         let magic_number: u64 = unsafe {
             let ptr = map.ptr().offset(0);
             let s = mem::transmute::<*const u8, &[u8; U64S]>(ptr);
-            mem::transmute_copy::<[u8; U64S], u64>(s)
+            deserialize(s).unwrap()
         };
 
         if magic_number != FILEARCO_MAGIC_NUMBER {
@@ -91,7 +91,7 @@ impl FileArco {
         let version_number: u64 = unsafe {
             let ptr = map.ptr().offset(U64S as isize);
             let s = mem::transmute::<*const u8, &[u8; U64S]>(ptr);
-            mem::transmute_copy::<[u8; U64S], u64>(s)
+            deserialize(s).unwrap()
         };
 
         if version_number != 1 {
@@ -101,13 +101,13 @@ impl FileArco {
         let header_length: u64 = unsafe {
             let ptr = map.ptr().offset((2 * U64S) as isize);
             let s = mem::transmute::<*const u8, &[u8; U64S]>(ptr);
-            mem::transmute_copy::<[u8; U64S], u64>(s)
+            deserialize(s).unwrap()
         };
 
         let header_checksum: u64 = unsafe {
             let ptr = map.ptr().offset((3 * U64S) as isize);
             let s = mem::transmute::<*const u8, &[u8; U64S]>(ptr);
-            mem::transmute_copy::<[u8; U64S], u64>(s)
+            deserialize(s).unwrap()
         };
 
         // Read in header.
@@ -244,13 +244,6 @@ impl FileArco {
         const U64S: usize = 8; // constant of mem::size_of::<u64>()
         const NUM_TOP_FIELDS: u64 = 4;
 
-        // // Create output directories if they do not already exist.
-        // #[allow(unused_variables)]
-        // let res = match out_path.as_ref().parent() {
-        //     Some(parent) => create_dir_all(&parent),
-        //     None => Ok(()),
-        // }?;
-
         let base_path = file_data.path();
    
         // Create entries table and serialize it.
@@ -264,35 +257,36 @@ impl FileArco {
                                  checksum(&entries_encoded));
         let header_encoded = serialize(&header, Infinite).unwrap();
   
-        // // Create output archive.
-        // let mut out_file = File::create(out_path)?;
-
         // Write file identification number to archive.
         let magic_number = FILEARCO_MAGIC_NUMBER;
-        let magic_number_encoded = unsafe {
-            mem::transmute::<u64, [u8; U64S]>(magic_number)
-        };
+        let magic_number_encoded = serialize(
+            &magic_number,
+            Bounded(mem::size_of::<u64>() as u64)
+        ).unwrap();
         out_file.write_all(&magic_number_encoded)?;
 
         // Write version number to archive.
         let version_number = VERSION_NUMBER;
-        let version_number_encoded = unsafe {
-            mem::transmute::<u64, [u8; U64S]>(version_number)
-        };
+        let version_number_encoded = serialize(
+            &version_number,
+            Bounded(mem::size_of::<u64>() as u64)
+        ).unwrap();
         out_file.write_all(&version_number_encoded)?;
 
         // Write header length to archive.
         let header_length = header_encoded.len() as u64;
-        let header_length_encoded = unsafe {
-            mem::transmute::<u64, [u8; U64S]>(header_length)
-        };
+        let header_length_encoded = serialize(
+            &header_length,
+            Bounded(mem::size_of::<u64>() as u64)
+        ).unwrap();
         out_file.write_all(&header_length_encoded)?;
 
         // Write header checksum to archive.
         let header_checksum = checksum(&header_encoded);
-        let header_checksum_encoded = unsafe {
-            mem::transmute::<u64, [u8; U64S]>(header_checksum)
-        };
+        let header_checksum_encoded = serialize(
+            &header_checksum,
+            Bounded(mem::size_of::<u64>() as u64)
+        ).unwrap();
         out_file.write_all(&header_checksum_encoded)?;
 
         // Write serialized header to archive.
@@ -392,10 +386,8 @@ impl FileRef {
     }
  
     /// This method retrieves a string representing the contents of a `FileRef`.
-    ///
-    /// # Unsafety
-    ///
-    /// The caller must ensure that the retrieved file is a valid UTF-8
+    /// It returns an error if the file contents do not represent a valid
+    /// UTF-8 string.
     ///
     /// # Example
     ///
@@ -413,11 +405,12 @@ impl FileRef {
     /// println!("{}", license_text);
     /// ```
     pub fn as_str(&self) -> Result<&str> {
-        unsafe {
-            let sl = slice::from_raw_parts(self.address, self.length as usize);
-            let s = str::from_utf8(sl)?;
-            Ok(s)
-        }
+        let sl = unsafe {
+            slice::from_raw_parts(self.address, self.length as usize)
+        };
+        let s = str::from_utf8(sl)?;
+
+        Ok(s)
     }
 
     /// This method retrieves the length of the file.
@@ -588,6 +581,7 @@ impl Entries {
     }
 }
 
+#[repr(C)]
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 struct Entry {
     offset: u64,
