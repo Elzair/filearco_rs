@@ -7,6 +7,8 @@
 
 `filearco_rs` is a Rust crate for creating and reading a simple archive format. It was designed for game development, but can be used for other purposes.
 
+It also includes a command-line utility, `filearco`, that writes all the files in a directory hierarchy into an archive.
+
 # Example
 
 This example demonstrates creating a FileArco version 1 archive file and retrieving a text file from that same archive.
@@ -24,6 +26,57 @@ fn main() {
     let license_text = license.as_str().ok().unwrap();
     println!("{}", license_text);
 }
+
+```
+
+# File Format
+
+## Version 1
+
+**NOTE:** All data is stored in LSB (i.e. "little endian") byte order.
+
+```rust
+// Ofset 0x00: Start of file
+#[repr(C)]
+struct Header {
+    id: [u8; 8],           // b"FILEARCO"
+    version_number: u64    // 1
+    file_offset: u64,      // Offset to first file
+    page_size: u64,        // Memory Page Size of system that created file
+    entries_length: u64,   // Length of Entries table (in bytes)
+    entries_checksum: u64, // CRC64-ISO checksum of Entries table
+}
+
+// Offset 0x30:
+header_checksum: u64 // CRC64-ISO checksum of Header
+
+// Offset 0x38:
+// Start of serialized HashMap<String, Entry>
+number_of_entries: u64
+
+// Offset 0x40: Start of first file's metadata
+file_name_length: u64,             // Length of file path (in bytes)
+file_name: [u8; file_name_length]  // File path as raw UTF-8 string
+
+#[repr(C)
+struct Entry {
+    offset: u64, 
+    length: u64,
+    aligned_length: u64,
+    checksum: u64
+}
+// Metadata for the second file (and so on) follow directly after
+
+// NOTE: the last Entry is followed by enough zeros to make the next section
+// start at a multiple of header.page_size
+
+// Offset M * header.page_size: Start of file contents section
+
+// Offset header.file_offset + entry.offset: Start of a file's contents
+contents: [u8; entry.length] // Contents of file as byte array
+
+// NOTE: Each contents array is followed by enough zeros to make the next file
+// contents array start at a multiple of header.page_size
 
 ```
 
