@@ -68,33 +68,25 @@ impl FileArco {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
         let map = Mmap::open_path(path.as_ref(), Protection::Read)?;
 
-        // `header_checksum` is bounded to the size of a u64 (probably 8 bytes).
-        let checksum_size = mem::size_of::<u64>();
-
         // Create test Header to determine size of encoded header.
         let test_header = Header::new(
-            checksum_size as u64,
             get_page_size() as u64,
             0,
             0
         );
         let test_header_encoded = serialize(&test_header, Infinite).unwrap();
 
+        // `header_checksum` is bounded to the size of a u64 (probably 8 bytes).
+        let checksum_size = mem::size_of::<u64>();
+
         // Make sure file is large enough to contain a FileArco v1 header.
-        if map.len() < checksum_size + test_header_encoded.len() {
+        if map.len() < test_header_encoded.len() + checksum_size {
             return Err(Error::FileArcoV1(FileArcoV1Error::FileTooSmall));
         }
 
-        // Read in header checksum.
-        let header_checksum: u64 = unsafe {
-            let ptr = map.ptr().offset(0);
-            let sl = slice::from_raw_parts(ptr, checksum_size);
-            deserialize(sl).unwrap()
-        };
-
         // Read in header.
         let (header, checksum1): (Header, u64) = unsafe {
-            let ptr = map.ptr().offset(checksum_size as isize);
+            let ptr = map.ptr().offset(0);
             let sl = slice::from_raw_parts(
                 ptr,
                 test_header_encoded.len()
@@ -104,6 +96,13 @@ impl FileArco {
                 deserialize(sl).unwrap(),
                 checksum(&sl)
             )
+        };
+
+        // Read in header checksum.
+        let header_checksum: u64 = unsafe {
+            let ptr = map.ptr().offset(test_header_encoded.len() as isize);
+            let sl = slice::from_raw_parts(ptr, checksum_size);
+            deserialize(sl).unwrap()
         };
 
         // Ensure header is valid.
@@ -235,33 +234,29 @@ impl FileArco {
         let entries = Entries::new(file_data);
         let entries_encoded: Vec<u8> = serialize(&entries, Infinite).unwrap();
 
-        // Create header and serialize it.
-        let header = Header::new(mem::size_of::<u64>() as u64,
-                                 get_page_size() as u64,
+        // Create header, serialize it, and write it to archive.
+        let header = Header::new(get_page_size() as u64,
                                  entries_encoded.len() as u64,
                                  checksum(&entries_encoded));
         let header_encoded = serialize(&header, Infinite).unwrap();
+        out_file.write_all(&header_encoded)?;
 
-        // Compute header checksum and write it to archive.
+        // Compute header checksum, serialize it, and write it to archive.
         let header_checksum = checksum(&header_encoded);
         let header_checksum_encoded = serialize(
             &header_checksum,
             Bounded(mem::size_of::<u64>() as u64)
         ).unwrap();
         out_file.write_all(&header_checksum_encoded)?;
-
-        // Write serialized header to archive.
-        out_file.write_all(&header_encoded)?;
         
-        // Write out serialized entries table.
+        // Write serialized entries table to archive.
         out_file.write_all(&entries_encoded)?;
 
         // Pad archive with zeros to ensure files begin at a multiple of `page_size`.
-        let padding_length = header.file_offset - (header_checksum_encoded.len() as u64 +
-                                                   header_encoded.len() as u64 +    
-                                                   header.entries_length);
-        let padding: Vec<u8> = vec![0u8; padding_length as usize];
-
+        let start_length = header_encoded.len() + header_checksum_encoded.len() +
+            entries_encoded.len();
+        let padding_length = (header.file_offset as usize) - start_length;
+        let padding: Vec<u8> = vec![0u8; padding_length];
         out_file.write_all(&padding)?;
 
         // Began writing files to archive.
@@ -511,8 +506,7 @@ struct Header {
 }
 
 impl Header {
-    fn new(current_offset: u64,
-           page_size: u64,
+    fn new(page_size: u64,
            entries_length: u64,
            entries_checksum: u64) -> Self {
         // Serialize test struct to determine `file_offset`.
@@ -526,8 +520,7 @@ impl Header {
         };
         let test_header_encoded = serialize(&test_header, Infinite).unwrap();
 
-        let file_offset = get_aligned_length(current_offset +
-                                             (test_header_encoded.len() as u64) +
+        let file_offset = get_aligned_length((test_header_encoded.len() as u64) +
                                              entries_length);
 
         Header {
