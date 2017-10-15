@@ -66,92 +66,80 @@ impl FileArco {
     /// let file_data = filearco::v1::FileArco::new(path).ok().unwrap(); 
     /// ```
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
-        const U64S: usize = 8; // constant of mem::size_of::<u64>()
-        const NUM_TOP_FIELDS: u64 = 4;
-
         let map = Mmap::open_path(path.as_ref(), Protection::Read)?;
 
-        if map.len() < (NUM_TOP_FIELDS as usize) * U64S {
+        // `header_checksum` is bounded to the size of a u64 (probably 8 bytes).
+        let checksum_size = mem::size_of::<u64>();
 
+        // Create test Header to determine size of encoded header.
+        let test_header = Header::new(
+            checksum_size as u64,
+            get_page_size() as u64,
+            0,
+            0
+        );
+        let test_header_encoded = serialize(&test_header, Infinite).unwrap();
+
+        // Make sure file is large enough to contain a FileArco v1 header.
+        if map.len() < checksum_size + test_header_encoded.len() {
             return Err(Error::FileArcoV1(FileArcoV1Error::FileTooSmall));
         }
 
-        // Read in initial data.
-
-        let magic_number: u64 = unsafe {
-            let ptr = map.ptr().offset(0);
-            let s = mem::transmute::<*const u8, &[u8; U64S]>(ptr);
-            deserialize(s).unwrap()
-        };
-
-        if magic_number != FILEARCO_MAGIC_NUMBER {
-            return Err(Error::FileArcoV1(FileArcoV1Error::NotArchive));
-        }
-
-        let version_number: u64 = unsafe {
-            let ptr = map.ptr().offset(U64S as isize);
-            let s = mem::transmute::<*const u8, &[u8; U64S]>(ptr);
-            deserialize(s).unwrap()
-        };
-
-        if version_number != 1 {
-            return Err(Error::FileArcoV1(FileArcoV1Error::NotArchive));
-        }
-
-        let header_length: u64 = unsafe {
-            let ptr = map.ptr().offset((2 * U64S) as isize);
-            let s = mem::transmute::<*const u8, &[u8; U64S]>(ptr);
-            deserialize(s).unwrap()
-        };
-
+        // Read in header checksum.
         let header_checksum: u64 = unsafe {
-            let ptr = map.ptr().offset((3 * U64S) as isize);
-            let s = mem::transmute::<*const u8, &[u8; U64S]>(ptr);
-            deserialize(s).unwrap()
+            let ptr = map.ptr().offset(0);
+            let sl = slice::from_raw_parts(ptr, checksum_size);
+            deserialize(sl).unwrap()
         };
 
         // Read in header.
+        let (header, checksum1): (Header, u64) = unsafe {
+            let ptr = map.ptr().offset(checksum_size as isize);
+            let sl = slice::from_raw_parts(
+                ptr,
+                test_header_encoded.len()
+            );
 
-        if map.len() < (NUM_TOP_FIELDS as usize) * U64S + (header_length as usize) {
-            return Err(Error::FileArcoV1(FileArcoV1Error::FileTooSmall));
-        }
-
-        let header: Header = unsafe {
-            let ptr = map.ptr().offset(((NUM_TOP_FIELDS as usize) * U64S) as isize);
-            let s = slice::from_raw_parts(ptr, header_length as usize);
-
-            // Ensure entries table is valid.
-            let test_checksum = checksum(&s);
-
-            if test_checksum != header_checksum {
-                return Err(Error::FileArcoV1(FileArcoV1Error::CorruptedHeader));
-            }
-
-            deserialize(s).unwrap()
+            (
+                deserialize(sl).unwrap(),
+                checksum(&sl)
+            )
         };
 
-        // Read in entries data.
+        // Ensure header is valid.
+        if header.magic_number != FILEARCO_MAGIC_NUMBER {
+            return Err(Error::FileArcoV1(FileArcoV1Error::NotArchive));
+        }
 
-        if map.len() < ((NUM_TOP_FIELDS as usize) * U64S +
-                        (header_length as usize) +
+        if header.version_number != 1 {
+            return Err(Error::FileArcoV1(FileArcoV1Error::NotV1Archive));
+        }
+
+        if checksum1 != header_checksum {
+            return Err(Error::FileArcoV1(FileArcoV1Error::CorruptedHeader));
+        }
+
+        if map.len() < (checksum_size + test_header_encoded.len() +
                         (header.entries_length as usize)) {
             return Err(Error::FileArcoV1(FileArcoV1Error::FileTooSmall));
         }
 
-        let entries = unsafe {
-            let offset = NUM_TOP_FIELDS * (U64S as u64) + header_length;
+        // Read in entries data.
+        let (entries, checksum2) = unsafe {
+            let offset = checksum_size + test_header_encoded.len();
             let ptr = map.ptr().offset(offset as isize);
-            let s = slice::from_raw_parts(ptr, header.entries_length as usize);
+            let sl = slice::from_raw_parts(ptr, header.entries_length as usize);
 
-            // Ensure entries table is valid.
-            let test_checksum = checksum(&s);
-
-            if test_checksum != header.entries_checksum {
-                return Err(Error::FileArcoV1(FileArcoV1Error::CorruptedEntriesTable));
-            }
-
-            deserialize(s).unwrap()
+            (
+                deserialize(sl).unwrap(),
+                checksum(&sl)
+            )
         };
+
+        // Ensure entries table is valid.
+        if checksum2 != header.entries_checksum {
+            return Err(Error::FileArcoV1(FileArcoV1Error::CorruptedEntriesTable));
+        }
 
         Ok(FileArco {
             inner: Arc::new(Inner {
@@ -241,9 +229,6 @@ impl FileArco {
     /// filearco::v1::FileArco::make(file_data, io::stdout()).ok().unwrap();
     /// ```
     pub fn make<H: Write>(file_data: FileData, mut out_file: H) -> Result<()> {
-        const U64S: usize = 8; // constant of mem::size_of::<u64>()
-        const NUM_TOP_FIELDS: u64 = 4;
-
         let base_path = file_data.path();
    
         // Create entries table and serialize it.
@@ -251,37 +236,13 @@ impl FileArco {
         let entries_encoded: Vec<u8> = serialize(&entries, Infinite).unwrap();
 
         // Create header and serialize it.
-        let header = Header::new(NUM_TOP_FIELDS * (U64S as u64),
+        let header = Header::new(mem::size_of::<u64>() as u64,
                                  get_page_size() as u64,
                                  entries_encoded.len() as u64,
                                  checksum(&entries_encoded));
         let header_encoded = serialize(&header, Infinite).unwrap();
-  
-        // Write file identification number to archive.
-        let magic_number = FILEARCO_MAGIC_NUMBER;
-        let magic_number_encoded = serialize(
-            &magic_number,
-            Bounded(mem::size_of::<u64>() as u64)
-        ).unwrap();
-        out_file.write_all(&magic_number_encoded)?;
 
-        // Write version number to archive.
-        let version_number = VERSION_NUMBER;
-        let version_number_encoded = serialize(
-            &version_number,
-            Bounded(mem::size_of::<u64>() as u64)
-        ).unwrap();
-        out_file.write_all(&version_number_encoded)?;
-
-        // Write header length to archive.
-        let header_length = header_encoded.len() as u64;
-        let header_length_encoded = serialize(
-            &header_length,
-            Bounded(mem::size_of::<u64>() as u64)
-        ).unwrap();
-        out_file.write_all(&header_length_encoded)?;
-
-        // Write header checksum to archive.
+        // Compute header checksum and write it to archive.
         let header_checksum = checksum(&header_encoded);
         let header_checksum_encoded = serialize(
             &header_checksum,
@@ -296,8 +257,8 @@ impl FileArco {
         out_file.write_all(&entries_encoded)?;
 
         // Pad archive with zeros to ensure files begin at a multiple of `page_size`.
-        let padding_length = header.file_offset - (NUM_TOP_FIELDS * (U64S as u64) +
-                                                   header_length +    
+        let padding_length = header.file_offset - (header_checksum_encoded.len() as u64 +
+                                                   header_encoded.len() as u64 +    
                                                    header.entries_length);
         let padding: Vec<u8> = vec![0u8; padding_length as usize];
 
@@ -541,6 +502,8 @@ struct Inner {
 #[repr(C)]
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 struct Header {
+    magic_number: u64,
+    version_number: u64,
     file_offset: u64,
     page_size: u64,
     entries_length: u64,
@@ -554,6 +517,8 @@ impl Header {
            entries_checksum: u64) -> Self {
         // Serialize test struct to determine `file_offset`.
         let test_header = Header {
+            magic_number: FILEARCO_MAGIC_NUMBER,
+            version_number: VERSION_NUMBER,
             file_offset: 0,
             page_size: page_size,
             entries_length: entries_length,
@@ -566,6 +531,8 @@ impl Header {
                                              entries_length);
 
         Header {
+            magic_number: FILEARCO_MAGIC_NUMBER,
+            version_number: VERSION_NUMBER,
             file_offset: file_offset,
             page_size: page_size,
             entries_length: entries_length,
@@ -724,7 +691,9 @@ mod tests {
                     assert!(archive.inner.entries.files.contains_key(name));
                 }
             },
-            Err(_) => { assert!(false); },
+            Err(err) => {
+                println!("test_v1_filearco_new {}", err.to_string());
+                assert!(false); },
         }
     }
 
