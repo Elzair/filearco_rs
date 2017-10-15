@@ -37,7 +37,7 @@ use crc::crc64::checksum_iso as checksum;
 use memmap::{Mmap, Protection};
 use page_size::get as get_page_size;
 
-use super::{Error, FILEARCO_MAGIC_NUMBER, Result};
+use super::{Error, FILEARCO_ID, Result};
 use file_data::FileData;
 
 const VERSION_NUMBER: u64 = 1;
@@ -107,7 +107,7 @@ impl FileArco {
         };
 
         // Ensure header is valid.
-        if header.magic_number != FILEARCO_MAGIC_NUMBER {
+        if header.id != *FILEARCO_ID {
             return Err(Error::FileArcoV1(FileArcoV1Error::NotArchive));
         }
 
@@ -502,7 +502,7 @@ struct Inner {
 #[repr(C)]
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 struct Header {
-    magic_number: u64,
+    id: [u8; 8],
     version_number: u64,
     file_offset: u64,
     page_size: u64,
@@ -517,7 +517,7 @@ impl Header {
            entries_checksum: u64) -> Self {
         // Serialize test struct to determine `file_offset`.
         let test_header = Header {
-            magic_number: FILEARCO_MAGIC_NUMBER,
+            id: *FILEARCO_ID,
             version_number: VERSION_NUMBER,
             file_offset: 0,
             page_size: page_size,
@@ -531,7 +531,7 @@ impl Header {
                                              entries_length);
 
         Header {
-            magic_number: FILEARCO_MAGIC_NUMBER,
+            id: *FILEARCO_ID,
             version_number: VERSION_NUMBER,
             file_offset: file_offset,
             page_size: page_size,

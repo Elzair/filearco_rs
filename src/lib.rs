@@ -46,7 +46,7 @@ extern crate walkdir;
 #[cfg(test)]
 extern crate memadvise;
 
-const FILEARCO_MAGIC_NUMBER: u64 = 0xF11EA4C0F11EA4C0; // It kinda looks like FILEARC0FILEARC0
+const FILEARCO_ID: &'static [u8; 8] = b"FILEARCO";
 
 mod file_data;
 pub mod v1;
