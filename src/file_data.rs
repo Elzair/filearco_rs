@@ -59,7 +59,8 @@ pub fn get<P: AsRef<Path>>(base_path: P) -> Result<FileData> {
             let full_path = ent.path().to_path_buf();
             let file_path = full_path.strip_prefix(&full_base_path)
                 .unwrap().to_path_buf();
-            let length = ent.metadata().ok().unwrap().len();
+            let metadata = ent.metadata()?;
+            let length = metadata.len();
 
             // We only support valid UTF-8 file paths.
             if let Some(p) = file_path.to_str() {
