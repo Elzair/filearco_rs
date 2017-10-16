@@ -72,6 +72,7 @@ impl FileArco {
         let test_header = Header::new(
             get_page_size() as u64,
             0,
+            0,
             0
         );
         let test_header_encoded = serialize(&test_header, Infinite).unwrap();
@@ -118,9 +119,8 @@ impl FileArco {
             return Err(Error::FileArcoV1(FileArcoV1Error::CorruptedHeader));
         }
 
-        if map.len() < (checksum_size + test_header_encoded.len() +
-                        (header.entries_length as usize)) {
-            return Err(Error::FileArcoV1(FileArcoV1Error::FileTooSmall));
+        if (map.len() as u64) < header.file_length {
+            return Err(Error::FileArcoV1(FileArcoV1Error::FileTruncated));
         }
 
         // Read in entries data.
@@ -237,6 +237,7 @@ impl FileArco {
         // Create header, serialize it, and write it to archive.
         let header = Header::new(get_page_size() as u64,
                                  entries_encoded.len() as u64,
+                                 entries.total_aligned_length(),
                                  checksum(&entries_encoded));
         let header_encoded = serialize(&header, Infinite).unwrap();
         out_file.write_all(&header_encoded)?;
@@ -423,23 +424,36 @@ impl FileRef {
 /// Error container for handling FileArco v1 archives
 #[derive(Debug)]
 pub enum FileArcoV1Error {
-    /// File is too small for the header and/or entries table of a FileArco v1 archive
-    FileTooSmall,
-    /// File does not have a valid identifier
-    NotArchive,
-    /// File has a valid identifier but an incorrect version number
-    NotV1Archive,
-    /// Header's computed checksum did not match the one stored in the file
-    CorruptedHeader,
-    /// Entry table's computed checksum did not match the one stored in the file
+    /// Entry table's computed checksum did not match the one stored in the file.
     CorruptedEntriesTable,
+    /// Header's computed checksum did not match the one stored in the file.
+    CorruptedHeader,
+    /// File is too small for the header of a FileArco v1 archive.
+    FileTooSmall,
+    /// File is a valid FileArco v1 archive but it has been truncated.
+    FileTruncated,
+    /// File does not have a valid identifier.
+    NotArchive,
+    /// File has a valid identifier but an incorrect version number.
+    NotV1Archive,
+    /// Something weird happened.
+    Other,
 }
 
 impl fmt::Display for FileArcoV1Error {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         match *self {
+            FileArcoV1Error::CorruptedEntriesTable => {
+                write!(fmt, "Corrupted entries table")
+            },
+            FileArcoV1Error::CorruptedHeader => {
+                write!(fmt, "Corrupted header")
+            },
             FileArcoV1Error::FileTooSmall => {
-                write!(fmt, "File too small for FileArco v1 archive")
+                write!(fmt, "File either too small for FileArco v1 archive or truncated")
+            },
+            FileArcoV1Error::FileTruncated => {
+                write!(fmt, "File truncated")
             },
             FileArcoV1Error::NotArchive => {
                 write!(fmt, "Not FileArco archive")
@@ -447,11 +461,8 @@ impl fmt::Display for FileArcoV1Error {
             FileArcoV1Error::NotV1Archive => {
                 write!(fmt, "Not FileArco v1 archive")
             },
-            FileArcoV1Error::CorruptedHeader => {
-                write!(fmt, "Corrupted header")
-            },
-            FileArcoV1Error::CorruptedEntriesTable => {
-                write!(fmt, "Corrupted entries table")
+            FileArcoV1Error::Other => {
+                write!(fmt, "Something weird happened")
             },
         }
     }
@@ -459,15 +470,26 @@ impl fmt::Display for FileArcoV1Error {
 
 impl error::Error for FileArcoV1Error {
     fn description(&self) -> &str {
-        static FILE_TOO_SMALL: &'static str = "File too small for FileArco v1 archive";
+        static CORRUPTED_ENTRIES_TABLE: &'static str = "Corrupted entries table";
+        static CORRUPTED_HEADER: &'static str = "Corrupted header";
+        static FILE_TOO_SMALL: &'static str = "File either too small for FileArco v1 archive or truncated";
+        static FILE_TRUNCATED: &'static str = "File truncated";
         static NOT_ARCHIVE: &'static str = "Not FileArco archive";
         static NOT_V1_ARCHIVE: &'static str = "Not FileArco v1 archive";
-        static CORRUPTED_HEADER: &'static str = "Corrupted header";
-        static CORRUPTED_ENTRIES_TABLE: &'static str = "Corrupted entries table";
+        static OTHER: &'static str = "Something weird happened";
 
         match *self {
+            FileArcoV1Error::CorruptedEntriesTable => {
+                CORRUPTED_ENTRIES_TABLE
+            },
+            FileArcoV1Error::CorruptedHeader => {
+                CORRUPTED_HEADER
+            },
             FileArcoV1Error::FileTooSmall => {
                 FILE_TOO_SMALL
+            },
+            FileArcoV1Error::FileTruncated => {
+                FILE_TRUNCATED
             },
             FileArcoV1Error::NotArchive => {
                 NOT_ARCHIVE
@@ -475,12 +497,9 @@ impl error::Error for FileArcoV1Error {
             FileArcoV1Error::NotV1Archive => {
                 NOT_V1_ARCHIVE
             },
-            FileArcoV1Error::CorruptedHeader => {
-                CORRUPTED_HEADER
-            },
-            FileArcoV1Error::CorruptedEntriesTable => {
-                CORRUPTED_ENTRIES_TABLE
-            },
+            FileArcoV1Error::Other => {
+                OTHER
+            }
         }
     }
 
@@ -499,6 +518,7 @@ struct Inner {
 struct Header {
     id: [u8; 8],
     version_number: u64,
+    file_length: u64,
     file_offset: u64,
     page_size: u64,
     entries_length: u64,
@@ -508,24 +528,28 @@ struct Header {
 impl Header {
     fn new(page_size: u64,
            entries_length: u64,
+           file_contents_length: u64,
            entries_checksum: u64) -> Self {
         // Serialize test struct to determine `file_offset`.
         let test_header = Header {
             id: *FILEARCO_ID,
             version_number: VERSION_NUMBER,
+            file_length: 0,
             file_offset: 0,
             page_size: page_size,
             entries_length: entries_length,
             entries_checksum: entries_checksum,
         };
         let test_header_encoded = serialize(&test_header, Infinite).unwrap();
+        let header_length = test_header_encoded.len() as u64;
 
-        let file_offset = get_aligned_length((test_header_encoded.len() as u64) +
-                                             entries_length);
+        let file_offset = get_aligned_length(header_length + entries_length);
+        let file_length = file_offset + file_contents_length;
 
         Header {
             id: *FILEARCO_ID,
             version_number: VERSION_NUMBER,
+            file_length: file_length,
             file_offset: file_offset,
             page_size: page_size,
             entries_length: entries_length,
@@ -568,6 +592,19 @@ impl Entries {
         Entries {
             files: files 
         }
+    }
+
+    fn total_aligned_length(&self) -> u64 {
+        let mut total_length = 0_u64;
+        
+        let keys = self.files.keys().cloned().collect::<Vec<_>>();
+
+        for key in keys {
+            let val = self.files.get(&key).unwrap();
+            total_length = total_length + val.aligned_length;
+        }
+
+        total_length
     }
 }
 
